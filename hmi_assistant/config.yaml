@@ -1,0 +1,39 @@
+llm:
+  active_provider: deepseek
+  thinking_depth: 中
+  stream: true
+  show_thinking: true
+  providers:
+    deepseek:
+      base_url: https://api.deepseek.com
+      api_key: ''
+      chat_model: deepseek-chat
+      reasoner_model: deepseek-reasoner
+      supports_vision: false
+    openai_compatible:
+      base_url: https://api.openai.com/v1
+      api_key: ''
+      chat_model: gpt-4o-mini
+      reasoner_model: o1-mini
+      supports_vision: true
+openness:
+  tia_version: V18
+  dll_path: C:\Program Files\Siemens\Automation\Portal V18\PublicAPI\V18\Siemens.Engineering.dll
+  attach_running: true
+  project_path: ''
+  hmi_device: HMI_1
+  screen_folder: ''
+  compile_after_import: true
+  save_after_import: false
+hmi_defaults:
+  resolution: 1280x800
+  hmi_type: Comfort
+  background_color: '#1F2630'
+  font_family: Arial
+output:
+  export_dir: exports
+  encoding: utf-8-sig
+server:
+  host: 127.0.0.1
+  port: 5000
+  debug: true
