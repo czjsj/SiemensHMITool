@@ -3,7 +3,17 @@
 HMI 画面 IR（中间表示）校验与归一化。
 对大模型产出的 JSON 做结构检查、补默认值、交叉引用校验，
 保证后续 SimaticML 生成与前端预览拿到的是干净数据。
+
+本版重点优化：
+1. 支持 Basic / Comfort / Unified；
+2. 接受常见分辨率及合法自定义 WxH 分辨率；
+3. 在 validate_ir() 末尾增加轻量级自动排版优化，
+   重点缓解控件重叠、行间距过小、同一行控件过密的问题。
 """
+
+from __future__ import annotations
+
+import copy
 
 VALID_OBJECT_TYPES = {
     "IOField", "SymbolicIOField", "Button", "Indicator", "Text"
@@ -11,11 +21,11 @@ VALID_OBJECT_TYPES = {
 VALID_MODES = {"Input", "Output", "InputOutput"}
 VALID_FORMATS = {"Decimal", "String", "Hex", "Binary"}
 VALID_DATATYPES = {"Bool", "Int", "DInt", "Real", "Word", "String"}
-VALID_RES = {
-    "1920x1080", "1366x768", "1280x800", "1024x768",
-    "800x480", "640x480", "480x272", "320x240",
-}
 VALID_HMI_TYPES = {"Basic", "Comfort", "Unified"}
+VALID_RES = {
+    "1920x1080", "1280x800", "1024x768", "800x480", "480x272",
+    "640x480", "320x240"
+}
 
 
 class IRValidationError(Exception):
@@ -28,134 +38,215 @@ def _req(d, key, where):
     return d[key]
 
 
-def _normalize_hmi_type(value: str) -> str:
-    """把用户/模型输入的 HMI 类型归一化为 Basic / Comfort / Unified。"""
-    raw = str(value or "Comfort").strip()
-    low = raw.lower()
-    if "unified" in low:
-        return "Unified"
-    if "basic" in low or "ktp" in low:
-        return "Basic"
-    if "comfort" in low:
-        return "Comfort"
-    return raw if raw in VALID_HMI_TYPES else "Comfort"
+def parse_resolution(value: str):
+    """解析 '800x480' 形式的分辨率，失败返回 None。"""
+    if not value or not isinstance(value, str) or "x" not in value.lower():
+        return None
+    try:
+        w, h = value.lower().split("x", 1)
+        w, h = int(w.strip()), int(h.strip())
+        if w > 0 and h > 0:
+            return w, h
+    except Exception:
+        return None
+    return None
 
 
-def _unique_id(base_id: str, seen_ids: set) -> str:
-    """生成唯一对象 ID，并登记到 seen_ids。"""
-    candidate = str(base_id or "Text")
-    if candidate not in seen_ids:
-        seen_ids.add(candidate)
-        return candidate
-    idx = 1
-    while f"{candidate}_{idx}" in seen_ids:
-        idx += 1
-    unique = f"{candidate}_{idx}"
-    seen_ids.add(unique)
-    return unique
+def _bbox(o: dict) -> tuple[int, int, int, int]:
+    """对象外接矩形 bbox: (x1, y1, x2, y2)。"""
+    if o.get("type") == "Indicator":
+        r = int(o.get("radius", 22))
+        x = int(o.get("x", 0)) - r
+        y = int(o.get("y", 0)) - r
+        return x, y, x + 2 * r, y + 2 * r
+    x = int(o.get("x", 0))
+    y = int(o.get("y", 0))
+    w = int(o.get("width", 0))
+    h = int(o.get("height", 0))
+    return x, y, x + max(1, w), y + max(1, h)
 
 
-def _estimate_text_width(text: str, font_size: int) -> int:
-    """粗略估算静态文本宽度，避免自动生成的标签/单位被截断。"""
-    total = 0.0
-    for ch in str(text or ""):
-        # 中文/全角字符约占一个字号宽度，ASCII 约占 0.55 个字号。
-        total += 1.0 if ord(ch) > 127 else 0.55
-    return int(round(total * max(8, int(font_size)))) + 10
+def _move_to_bbox(o: dict, x1: int, y1: int):
+    """把对象移动到给定左上角。"""
+    if o.get("type") == "Indicator":
+        r = int(o.get("radius", 22))
+        o["x"] = int(x1 + r)
+        o["y"] = int(y1 + r)
+    else:
+        o["x"] = int(x1)
+        o["y"] = int(y1)
 
 
-def _make_text_object(
-    seen_ids: set,
-    obj_id: str,
-    x: int,
-    y: int,
-    width: int,
-    height: int,
-    text: str,
-    font_size: int,
-    bold: bool = False,
-    color: str = "#C9D3DE",
-) -> dict:
-    """构造一个真实 Text 对象。TIA 中静态文字本身也是 ScreenItem。"""
-    return {
-        "id": _unique_id(obj_id, seen_ids),
-        "type": "Text",
-        "x": int(max(0, x)),
-        "y": int(max(0, y)),
-        "width": int(max(1, width)),
-        "height": int(max(1, height)),
-        "text": str(text or ""),
-        "font_size": int(max(8, font_size)),
-        "bold": bool(bold),
-        "color": color or "#C9D3DE",
-    }
+def _is_title_text(o: dict) -> bool:
+    return (
+        o.get("type") == "Text" and (
+            bool(o.get("bold")) or int(o.get("font_size", 0)) >= 22 or o.get("id") == "TXT_Title"
+        )
+    )
 
 
-def _expand_label_and_unit_text_objects(norm_objs: list, seen_ids: set, warnings: list) -> list:
-    """把 label/unit 从控件附属字段展开为真实 Text 对象。
+def _object_center_y(o: dict) -> float:
+    x1, y1, x2, y2 = _bbox(o)
+    return (y1 + y2) / 2.0
 
-    原因：WinCC/TIA 中每一段静态文字都是独立 ScreenItem。如果 IR 里只把
-    IOField/Indicator 的 label、IOField 的 unit 当作属性，前端统计会少算，
-    模板 XML 路线也无法为这些文字创建/克隆控件，导致导入画面不完整。
 
-    展开后会清空原控件上的 label/unit，避免预览渲染和 SimaticML 生成时重复画文字。
-    """
-    expanded = []
-    auto_count = 0
-    for o in norm_objs:
-        otype = o.get("type")
+def _min_h_gap(a: dict, b: dict) -> int:
+    ta, tb = a.get("type"), b.get("type")
+    pair = {ta, tb}
+    if pair == {"Button"}:
+        return 24
+    if pair == {"Indicator"}:
+        return 24
+    if ta == "Text" or tb == "Text":
+        return 12
+    return 20
 
-        # 左侧标签：IOField / SymbolicIOField / Indicator 都需要真实 TextField。
-        label = str(o.get("label") or "").strip()
-        if label and otype in ("IOField", "SymbolicIOField", "Indicator"):
-            fs = max(10, min(14, int(o.get("font_size", 16)) - 2))
-            h = int(o.get("height", int(o.get("radius", 20)) * 2))
-            w = min(128, max(42, _estimate_text_width(label, fs)))
-            x = int(o.get("x", 0)) - w - 8
-            y = int(o.get("y", 0)) + max(0, (h - fs) // 2) - 2
-            expanded.append(_make_text_object(
-                seen_ids=seen_ids,
-                obj_id=f"{o.get('id', otype)}_lbl",
-                x=x,
-                y=y,
-                width=w,
-                height=max(20, fs + 8),
-                text=label,
-                font_size=fs,
-                bold=False,
-                color="#C9D3DE",
-            ))
-            o["label"] = ""
-            auto_count += 1
 
-        expanded.append(o)
+def _min_v_gap(prev_row: list[dict], next_row: list[dict]) -> int:
+    types = {o.get("type") for o in prev_row + next_row}
+    if "Button" in types:
+        return 22
+    return 18
 
-        # 右侧单位：IOField 的单位同样是独立 TextField。
-        unit = str(o.get("unit") or "").strip()
-        if unit and otype == "IOField":
-            fs = max(10, min(14, int(o.get("font_size", 16)) - 2))
-            w = min(96, max(32, _estimate_text_width(unit, fs)))
-            h = int(o.get("height", 40))
-            x = int(o.get("x", 0)) + int(o.get("width", 140)) + 8
-            y = int(o.get("y", 0)) + max(0, (h - fs) // 2) - 2
-            expanded.append(_make_text_object(
-                seen_ids=seen_ids,
-                obj_id=f"{o.get('id', otype)}_unit",
-                x=x,
-                y=y,
-                width=w,
-                height=max(20, fs + 8),
-                text=unit,
-                font_size=fs,
-                bold=False,
-                color="#9AA7B4",
-            ))
-            o["unit"] = ""
-            auto_count += 1
 
-    if auto_count:
-        warnings.append(f"已将 {auto_count} 个 label/unit 展开为真实 Text 对象，前端对象数与 TIA 对象数保持一致")
-    return expanded
+def _row_bounds(row: list[dict]) -> tuple[int, int, int, int]:
+    xs1, ys1, xs2, ys2 = [], [], [], []
+    for o in row:
+        x1, y1, x2, y2 = _bbox(o)
+        xs1.append(x1); ys1.append(y1); xs2.append(x2); ys2.append(y2)
+    return min(xs1), min(ys1), max(xs2), max(ys2)
+
+
+def _cluster_rows(objs: list[dict], tolerance: int = 26) -> list[list[dict]]:
+    rows: list[list[dict]] = []
+    for o in sorted(objs, key=lambda item: (_bbox(item)[1], _bbox(item)[0])):
+        cy = _object_center_y(o)
+        placed = False
+        for row in rows:
+            row_cy = sum(_object_center_y(x) for x in row) / len(row)
+            if abs(cy - row_cy) <= tolerance:
+                row.append(o)
+                placed = True
+                break
+        if not placed:
+            rows.append([o])
+    for row in rows:
+        row.sort(key=lambda item: _bbox(item)[0])
+    rows.sort(key=lambda row: _row_bounds(row)[1])
+    return rows
+
+
+def _optimize_layout(ir: dict) -> dict:
+    """对对象做轻量自动排版。"""
+    screen = ir.get("_screen_size") or {}
+    sw = int(screen.get("width", 1280))
+    sh = int(screen.get("height", 800))
+    margin_x = 24 if sw >= 800 else 18
+    margin_y = 20 if sh >= 480 else 14
+
+    objects = ir.get("objects") or []
+    if not objects:
+        return ir
+
+    warnings = ir.setdefault("_warnings", [])
+
+    # 标题轻度规范化：居中并吸附到顶部安全区域。
+    for o in objects:
+        if _is_title_text(o):
+            w = int(o.get("width", min(360, sw - 2 * margin_x)))
+            o["width"] = min(w, max(80, sw - 2 * margin_x))
+            o["x"] = max(margin_x, int((sw - o["width"]) / 2))
+            o["y"] = max(margin_y, min(int(o.get("y", margin_y)), margin_y + 12))
+            break
+
+    title_ids = {o.get("id") for o in objects if _is_title_text(o)}
+    controls = [o for o in objects if o.get("id") not in title_ids]
+    if not controls:
+        return ir
+
+    rows = _cluster_rows(controls)
+
+    # 逐行做水平对齐与最小间距修复。
+    for row in rows:
+        row.sort(key=lambda item: _bbox(item)[0])
+        top_targets = [_bbox(o)[1] for o in row]
+        target_top = int(round(sum(top_targets) / len(top_targets)))
+
+        for idx, o in enumerate(row):
+            x1, y1, x2, y2 = _bbox(o)
+            _move_to_bbox(o, x1, target_top)
+            if idx == 0:
+                x1, y1, x2, y2 = _bbox(o)
+                if x1 < margin_x:
+                    _move_to_bbox(o, margin_x, y1)
+                continue
+
+            prev = row[idx - 1]
+            px1, py1, px2, py2 = _bbox(prev)
+            cx1, cy1, cx2, cy2 = _bbox(o)
+            min_gap = _min_h_gap(prev, o)
+            if cx1 < px2 + min_gap:
+                cx1 = px2 + min_gap
+                _move_to_bbox(o, cx1, cy1)
+
+        # 如果该行整体超出右边界，整行左移到可见范围内。
+        _, _, rx2, _ = _row_bounds(row)
+        max_right = sw - margin_x
+        if rx2 > max_right:
+            shift = rx2 - max_right
+            for o in row:
+                x1, y1, x2, y2 = _bbox(o)
+                _move_to_bbox(o, max(margin_x, x1 - shift), y1)
+
+    # 逐行拉开垂直间距，避免区块过密。
+    rows = _cluster_rows(controls)
+    for i in range(1, len(rows)):
+        prev_row = rows[i - 1]
+        row = rows[i]
+        _, _, _, prev_bottom = _row_bounds(prev_row)
+        _, row_top, _, _ = _row_bounds(row)
+        min_gap = _min_v_gap(prev_row, row)
+        if row_top < prev_bottom + min_gap:
+            delta = (prev_bottom + min_gap) - row_top
+            for o in row:
+                x1, y1, x2, y2 = _bbox(o)
+                _move_to_bbox(o, x1, y1 + delta)
+
+    # 多轮全局重叠修复：后出现的对象尽量向下避让。
+    all_objs = sorted(objects, key=lambda item: (_bbox(item)[1], _bbox(item)[0]))
+    for _ in range(3):
+        moved = False
+        for i in range(len(all_objs)):
+            ax1, ay1, ax2, ay2 = _bbox(all_objs[i])
+            for j in range(i + 1, len(all_objs)):
+                bx1, by1, bx2, by2 = _bbox(all_objs[j])
+                overlap_x = min(ax2, bx2) - max(ax1, bx1)
+                overlap_y = min(ay2, by2) - max(ay1, by1)
+                if overlap_x > 0 and overlap_y > 0:
+                    shift = overlap_y + 12
+                    _move_to_bbox(all_objs[j], bx1, by1 + shift)
+                    moved = True
+        if not moved:
+            break
+
+    # 最终边界裁剪，保证对象不出界。
+    for o in all_objs:
+        x1, y1, x2, y2 = _bbox(o)
+        width = x2 - x1
+        height = y2 - y1
+        if x1 < margin_x:
+            x1 = margin_x
+        if y1 < margin_y:
+            y1 = margin_y
+        if x1 + width > sw - margin_x:
+            x1 = max(margin_x, sw - margin_x - width)
+        if y1 + height > sh - margin_y:
+            y1 = max(margin_y, sh - margin_y - height)
+        _move_to_bbox(o, x1, y1)
+
+    warnings.append("已对 IR 自动执行轻量布局优化：对齐、最小间距、重叠与越界修正。")
+    ir["_layout_optimized"] = True
+    return ir
 
 
 def validate_ir(ir: dict) -> dict:
@@ -163,27 +254,21 @@ def validate_ir(ir: dict) -> dict:
     if not isinstance(ir, dict):
         raise IRValidationError("IR 必须是 JSON 对象")
 
-    # ---- meta ----
     meta = ir.get("meta") or {}
     meta.setdefault("screen_name", "Screen_1")
     meta.setdefault("title", meta["screen_name"])
     meta.setdefault("description", "")
-    warnings = []
 
-    res = str(meta.get("resolution", "1280x800") or "1280x800").strip()
-    if res not in VALID_RES:
-        parsed = parse_resolution(res)
-        if parsed:
-            res = f"{parsed[0]}x{parsed[1]}"
-            warnings.append(f"使用自定义 HMI 分辨率 {res}，请确认与目标面板一致。")
-        else:
-            warnings.append(f"非法分辨率 '{res}'，已回退到 1280x800。")
-            res = "1280x800"
+    res = meta.get("resolution", "1280x800")
+    if res not in VALID_RES and not parse_resolution(res):
+        res = "1280x800"
     meta["resolution"] = res
 
-    meta["hmi_type"] = _normalize_hmi_type(meta.get("hmi_type", "Comfort"))
+    hmi_type = meta.get("hmi_type", "Comfort")
+    if hmi_type not in VALID_HMI_TYPES:
+        hmi_type = "Comfort"
+    meta["hmi_type"] = hmi_type
 
-    # 双路线生成可选字段（默认值）
     VALID_GEN_MODES = {"auto", "unified_direct", "classic_template_xml", "simaticml"}
     gen_mode = meta.get("generation_mode", "auto")
     if gen_mode not in VALID_GEN_MODES:
@@ -191,14 +276,10 @@ def validate_ir(ir: dict) -> dict:
     meta["generation_mode"] = gen_mode
     meta.setdefault("template_screen", "")
     meta.setdefault("template_xml", "")
-
     ir["meta"] = meta
 
-    # 画面像素尺寸
-    w, h = res.split("x")
-    screen_w, screen_h = int(w), int(h)
+    screen_w, screen_h = parse_resolution(res) or (1280, 800)
 
-    # ---- tags ----
     tags = ir.get("tags") or []
     tag_names = set()
     norm_tags = []
@@ -216,7 +297,6 @@ def validate_ir(ir: dict) -> dict:
         tag_names.add(name)
     ir["tags"] = norm_tags
 
-    # ---- text_lists ----
     text_lists = ir.get("text_lists") or []
     list_names = set()
     norm_lists = []
@@ -233,7 +313,6 @@ def validate_ir(ir: dict) -> dict:
         list_names.add(name)
     ir["text_lists"] = norm_lists
 
-    # ---- scripts ----
     scripts = ir.get("scripts") or []
     script_names = set()
     norm_scripts = []
@@ -247,17 +326,12 @@ def validate_ir(ir: dict) -> dict:
         })
         script_names.add(name)
     ir["scripts"] = norm_scripts
-    if meta.get("hmi_type") == "Basic" and norm_scripts:
-        warnings.append(
-            "当前 IR 目标为 Basic 面板：Basic/KTP Basic 对脚本和高级控件支持有限；"
-            "推荐通过 Basic 面板导出的模板 XML 预置按钮事件或改为 PLC 变量触发。"
-        )
 
-    # ---- objects ----
     objects = ir.get("objects") or []
     if not objects:
         raise IRValidationError("objects 为空，画面没有任何对象")
 
+    warnings = []
     norm_objs = []
     seen_ids = set()
     for i, o in enumerate(objects):
@@ -270,13 +344,12 @@ def validate_ir(ir: dict) -> dict:
             oid = f"{oid}_{i}"
         seen_ids.add(oid)
 
-        x = int(o.get("x", 0)); y = int(o.get("y", 0))
-        # 越界裁剪提示（不强制报错）
+        x = int(o.get("x", 0))
+        y = int(o.get("y", 0))
         if x < 0 or y < 0 or x > screen_w or y > screen_h:
             warnings.append(f"{where}({oid}) 坐标超出画面范围，已保留原值")
 
         base = {"id": oid, "type": otype, "x": x, "y": y}
-        # 模板引用（可选，仅经典模板 XML 模式使用）
         if o.get("template_ref"):
             base["template_ref"] = o["template_ref"]
 
@@ -312,10 +385,6 @@ def validate_ir(ir: dict) -> dict:
                     warnings.append(f"{where}({oid}) 事件 {ev} 引用脚本 '{sc}' 未定义")
                 base[ev] = sc or None
             base["background_color"] = o.get("background_color", "#2BB673")
-            if meta.get("hmi_type") == "Basic" and any(base.get(ev) for ev in ("press_script", "release_script", "click_script")):
-                warnings.append(
-                    f"{where}({oid}) 绑定了脚本事件；Basic 面板建议使用模板中预置的按钮事件或 PLC 变量触发。"
-                )
 
         elif otype == "Indicator":
             base["radius"] = int(o.get("radius", 22))
@@ -338,44 +407,14 @@ def validate_ir(ir: dict) -> dict:
 
         norm_objs.append(base)
 
-    # WinCC/TIA 中静态文字本身也是画面对象。
-    # 因此把 IOField/Indicator 的 label 与 IOField 的 unit 展开为显式 Text 对象，
-    # 避免“前端 9 个对象、TIA 实际 15 个对象”的数量不一致。
-    norm_objs = _expand_label_and_unit_text_objects(norm_objs, seen_ids, warnings)
-
     ir["objects"] = norm_objs
     ir["_warnings"] = warnings
     ir["_screen_size"] = {"width": screen_w, "height": screen_h}
-    return ir
-
-
-# ---------------------------------------------------------------------------
-# 分辨率 / 坐标适配辅助函数
-# ---------------------------------------------------------------------------
-
-def parse_resolution(value: str):
-    """解析 "800x480" 形式的分辨率，失败返回 None。"""
-    if not value or not isinstance(value, str) or "x" not in value.lower():
-        return None
-    try:
-        w, h = value.lower().split("x", 1)
-        w, h = int(w.strip()), int(h.strip())
-        if w > 0 and h > 0:
-            return w, h
-    except Exception:
-        return None
-    return None
+    return _optimize_layout(ir)
 
 
 def scale_ir_to_resolution(ir: dict, target_resolution: str, in_place: bool = False) -> dict:
-    """把 IR 的 meta.resolution、_screen_size 以及对象坐标统一到目标分辨率。
-
-    用途：让前端预览、视觉审查、模板 XML 导入使用同一坐标系。
-    例如 LLM 输出 1280x800，但实际 Comfort 面板为 800x480 时，
-    这里会把 x/y/width/height/radius/font_size 按比例缩放。
-    """
-    import copy
-
+    """把 IR 的 meta.resolution、_screen_size 以及对象坐标统一到目标分辨率。"""
     target = parse_resolution(target_resolution)
     if not target:
         return ir

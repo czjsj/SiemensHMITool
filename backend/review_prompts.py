@@ -2,14 +2,16 @@
 """
 审查与修正提示词
 ================
-包含 MiMo 视觉审查任务模板、DeepSeek 修正模式提示词、
+包含 MiMo 视觉审查任务模板、修正模式提示词、
 以及 Siemens HMI 画面设计标准参考。
+
+本版重点优化：
+1. 强化对“间距过小 / 对齐不齐 / 页面过密”的识别；
+2. 审查输出尽量可操作，让再生成阶段更容易修正；
+3. 兼容 Basic / Comfort / Unified 的一般性 HMI 版式审查。
 """
 import json
 
-# ---------------------------------------------------------------------------
-# Siemens HMI 画面设计标准色参考
-# ---------------------------------------------------------------------------
 SIEMENS_COLOR_REFERENCE = """
 【Siemens HMI 标准色参考】
 - 运行/正常/启动: 绿色 #27D17F
@@ -24,43 +26,47 @@ SIEMENS_COLOR_REFERENCE = """
 - 输入框背景: #0E1622
 """.strip()
 
-# ---------------------------------------------------------------------------
-# MiMo 审查任务模板
-# ---------------------------------------------------------------------------
 HMI_REVIEW_TASK = f"""
 你是西门子 WinCC / 博途(TIA Portal) HMI 画面设计审查专家。
-请仔细审查这张 HMI 画面预览图，按照以下 Siemens Basic/Comfort/Unified HMI 画面工程标准逐项评估。
+请仔细审查这张 HMI 画面预览图，按照以下 Siemens HMI 工程标准逐项评估。
 只描述图中可见内容，不要凭空推测。
 
 {SIEMENS_COLOR_REFERENCE}
 
+【核心审查原则】
+- 优先识别：重叠、越界、间距过小、对齐不齐、区块混乱、文字可读性差。
+- 间距问题请尽量具体：指出“哪两个对象过近”或“哪一行过密”。
+- 若页面质量尚可，也要指出最值得优先优化的 1~3 个点。
+- 重点关注工程交付质量，而不是艺术风格。
+
 【评估维度】
 
 1. 布局清晰度与对齐 (layout_alignment)
-   - 同类对象（按钮/IO域/指示灯）是否对齐排列？
-   - 各区域之间是否有合理间距（至少 20px）？
-   - 元素是否有重叠或边界越界？
-   - 信息分区是否清晰（如：标题区/控制区/显示区）？
+   - 同类对象（按钮/IO域/指示灯）是否严格对齐排列？
+   - 标题区、控制区、状态区、参数区等信息分区是否清晰？
+   - 是否存在对象堆叠在左上角、整体重心失衡、局部过密而其他区域过空的情况？
+   - 对于同一行对象，如果水平间距小于约 20px，应视为“过近”；
+     对于区块之间，如果垂直间距小于约 20px，应视为“过密”。
 
 2. 组件尺寸与间距 (component_sizing)
-   - 按钮尺寸是否适合触摸/鼠标操作（建议宽度 ≥ 120px, 高度 ≥ 50px）？
+   - 按钮尺寸是否适合操作（建议宽度 ≥ 120px, 高度 ≥ 50px）？
    - IO 域尺寸是否适合显示数值（建议宽度 ≥ 140px, 高度 ≥ 40px）？
-   - 指示灯半径是否在画面中比例合适（建议 20-30px）？
+   - 指示灯半径是否合适（建议 20~30px）？
    - 同类组件尺寸是否一致？
+   - 标签与对应控件的距离是否太远或太近？
 
 3. 颜色规范 (color_conventions)
-   - 运行/启动类是否使用了绿色系（#27D17F 或相近）？
-   - 停止/故障/报警类是否使用了红色系（#E25563 或相近）？
-   - 指示灯颜色是否符合语义（运行绿、故障红、状态青）？
-   - 背景颜色是否统一（深色 #1F2630）？
-   - 文字颜色与背景对比度是否足够？
+   - 运行/启动类是否使用绿色系？
+   - 停止/故障/报警类是否使用红色系？
+   - 背景与文字的对比度是否足够？
+   - 是否有颜色语义混乱的情况？
 
 4. 文字可读性 (text_readability)
    - 所有中文标签是否完整、清晰、未被截断？
-   - 标题字号是否突出（建议 24-28px）？
-   - 标签字号是否合适（建议 12-16px）？
-   - 按钮文字是否简洁（不超过 6 个汉字）？
-   - 文字是否有溢出或越界？
+   - 标题字号是否突出（建议 24~28px）？
+   - 标签字号是否合适（建议 12~16px）？
+   - 按钮文字是否简洁、居中、清晰？
+   - 是否存在多行文字挤压、文本与控件边框过近的情况？
 
 5. 元素完整性 (completeness)
    - 画面是否有标题？
@@ -71,8 +77,8 @@ HMI_REVIEW_TASK = f"""
 
 6. 整体专业质量 (professional_quality)
    - 画面布局是否整洁、符合工程交付标准？
-   - 是否有多余/无用/意义不明的元素？
-   - 整体视觉是否达到 Siemens HMI 工程画面的专业水准？
+   - 是否有多余、无用、意义不明的元素？
+   - 整体视觉是否达到专业 HMI 工程画面的水准？
    - 空白区域的使用是否合理（既不过密也不过疏）？
 
 【输出要求】
@@ -90,19 +96,19 @@ HMI_REVIEW_TASK = f"""
   }},
   "summary": "整体中文评价，一句话总结画面质量",
   "critical_issues": ["必须立即修复的关键问题"],
-  "suggestions": ["改进建议"]
+  "suggestions": ["可执行的改进建议"]
 }}
 
 注意：
 - 如果某类问题不存在，issues 留空数组，pass 设为 true。
-- score 应客观反映整体质量：90+ 优秀，70-89 合格，50-69 需改进，<50 不合格。
-- critical_issues 只放必须修复的严重问题（如缺少关键元素、严重的布局错乱）。
-- suggestions 放改进建议（非必须修复但能让画面更好）。
+- score 应客观反映整体质量：90+ 优秀，70~89 合格，50~69 需改进，<50 不合格。
+- 只把真正严重的问题放进 critical_issues，例如：关键元素缺失、严重重叠、明显越界、按钮挤在一起难以操作。
+- suggestions 尽量写成可执行建议，例如：
+  “将三枚按钮整理为同一行并拉开 24px 以上间距”；
+  “将状态指示灯整体下移，与标题区拉开距离”；
+  “把参数显示区改成两列等宽布局”。
 """.strip()
 
-# ---------------------------------------------------------------------------
-# MiMo 图片分析任务模板（分析上传的参考图片）
-# ---------------------------------------------------------------------------
 IMAGE_ANALYSIS_TASK = """
 你是一位 HMI 画面设计需求分析师。请分析这张参考图片/图纸，提取其中与 HMI 画面设计相关的信息。
 
@@ -113,6 +119,7 @@ IMAGE_ANALYSIS_TASK = """
 4. 整体的画面布局方式（上下分区、左右分区、仪表盘式等）？
 5. 是否有特殊的图形元素（管道、流程图、设备图标、曲线图等）？
 6. 文字标签使用什么语言？有哪些关键标注？
+7. 是否存在值得复用的排版模式（如按钮区、状态区、参数区的组织方式）？
 
 请用中文按以下 JSON 格式输出：
 {
@@ -127,9 +134,6 @@ IMAGE_ANALYSIS_TASK = """
 只描述图中可见内容，不要凭空推测。
 """.strip()
 
-# ---------------------------------------------------------------------------
-# DeepSeek 修正模式系统提示（追加到 SYSTEM_PROMPT 后面）
-# ---------------------------------------------------------------------------
 REGENERATION_SYSTEM_ADDENDUM = """
 【审查反馈改进模式】
 
@@ -140,7 +144,7 @@ REGENERATION_SYSTEM_ADDENDUM = """
 2. 特别关注 critical_issues —— 这些是必须修复的关键问题。
 3. 保留审查未指出问题的正确部分（不要过度修改）。
 4. 若审查指出缺少元素，在正确位置新增对象并在 tags/text_lists 中声明关联变量。
-5. 若审查指出布局/尺寸问题，调整坐标和尺寸使其符合规范。
+5. 若审查指出布局/尺寸问题，优先处理：重叠、越界、按钮过密、区块过密、同类对象不对齐。
 6. 若审查指出颜色不合规范，参照 Siemens 标准色修正。
 7. 若审查指出文字问题，修正标签、标题的文字内容和字号。
 8. 修改后输出完整的 IR JSON（用 ```json 代码块包裹），不要省略任何已有对象。
@@ -148,10 +152,7 @@ REGENERATION_SYSTEM_ADDENDUM = """
 
 
 def build_review_feedback_text(review_result: dict) -> str:
-    """
-    将 MiMo 审查结果转换为 DeepSeek 能理解的反馈文本。
-    只提取有实际问题的部分，避免信息过载。
-    """
+    """将 MiMo 审查结果转换为模型更容易执行的修正反馈文本。"""
     lines = []
 
     score = review_result.get("score", 0)
@@ -160,7 +161,6 @@ def build_review_feedback_text(review_result: dict) -> str:
     lines.append(f"整体评价: {review_result.get('summary', '无')}")
     lines.append("")
 
-    # 关键问题优先
     critical = review_result.get("critical_issues") or []
     if critical:
         lines.append("## 关键问题（必须修复）")
@@ -168,11 +168,10 @@ def build_review_feedback_text(review_result: dict) -> str:
             lines.append(f"{i}. {issue}")
         lines.append("")
 
-    # 按类别列出问题
     categories = review_result.get("categories") or {}
     cat_labels = {
         "layout_alignment": "布局与对齐",
-        "component_sizing": "组件尺寸",
+        "component_sizing": "组件尺寸与间距",
         "color_conventions": "颜色规范",
         "text_readability": "文字可读性",
         "completeness": "元素完整性",
@@ -187,7 +186,6 @@ def build_review_feedback_text(review_result: dict) -> str:
                 lines.append(f"{i}. {issue}")
             lines.append("")
 
-    # 改进建议
     suggestions = review_result.get("suggestions") or []
     if suggestions:
         lines.append("## 改进建议")
@@ -203,20 +201,8 @@ def build_regeneration_messages(
     previous_ir: dict,
     review_result: dict,
 ) -> list:
-    """
-    构建带给 DeepSeek 的修正模式 messages。
-
-    参数:
-        requirement: 用户原始中文画面需求。
-        previous_ir: 被审查的上一版 IR（完整 dict）。
-        review_result: MiMo 审查结果（含 pass/score/categories 等）。
-
-    返回:
-        messages 列表，可直接传给 LLMClient.stream()。
-    """
+    """构建修正模式 messages。"""
     feedback_text = build_review_feedback_text(review_result)
-
-    # 序列化之前的 IR（紧凑格式，省 token）
     ir_json = json.dumps(previous_ir, ensure_ascii=False, indent=2)
 
     system_content = (
