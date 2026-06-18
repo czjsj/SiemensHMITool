@@ -1,0 +1,173 @@
+{
+  "meta": {
+    "screen_name": "Pipeline_Flow",
+    "title": "管道流量控制",
+    "description": "管道流量画面：显示瞬时/累计流量，泵运行指示灯，启动/停止按钮，流动态指示灯及动画数值。假设累计流量为Real，泵运行状态由PLC反馈。流动动画通过VBS循环步进0~100。",
+    "resolution": "800x480",
+    "hmi_type": "Comfort",
+    "generation_mode": "auto",
+    "template_screen": "",
+    "template_xml": ""
+  },
+  "tags": [
+    {
+      "name": "Flow_Instant",
+      "data_type": "Real",
+      "address": "%MD100",
+      "comment": "瞬时流量 m³/h"
+    },
+    {
+      "name": "Flow_Total",
+      "data_type": "Real",
+      "address": "%MD104",
+      "comment": "累计流量 m³"
+    },
+    {
+      "name": "Pump_Running",
+      "data_type": "Bool",
+      "address": "%M1.0",
+      "comment": "泵运行反馈"
+    },
+    {
+      "name": "Flow_Animation",
+      "data_type": "Int",
+      "address": "%MW30",
+      "comment": "流动动画值 0~100"
+    },
+    {
+      "name": "Flow_AnimActive",
+      "data_type": "Bool",
+      "address": "%M1.1",
+      "comment": "流动动画激活标志"
+    }
+  ],
+  "text_lists": [],
+  "objects": [
+    {
+      "id": "TXT_Title",
+      "type": "Text",
+      "x": 180,
+      "y": 20,
+      "width": 440,
+      "height": 44,
+      "text": "管道流量控制",
+      "font_size": 26,
+      "bold": true,
+      "color": "#E6EDF3"
+    },
+    {
+      "id": "IO_FlowInstant",
+      "type": "IOField",
+      "x": 170,
+      "y": 95,
+      "width": 160,
+      "height": 44,
+      "mode": "Output",
+      "process_tag": "Flow_Instant",
+      "font_size": 18,
+      "label": "瞬时流量",
+      "display_format": "Decimal",
+      "decimal_digits": 1,
+      "unit": "m³/h"
+    },
+    {
+      "id": "IO_FlowTotal",
+      "type": "IOField",
+      "x": 170,
+      "y": 155,
+      "width": 160,
+      "height": 44,
+      "mode": "Output",
+      "process_tag": "Flow_Total",
+      "font_size": 18,
+      "label": "累计流量",
+      "display_format": "Decimal",
+      "decimal_digits": 1,
+      "unit": "m³"
+    },
+    {
+      "id": "LMP_Pump",
+      "type": "Indicator",
+      "x": 170,
+      "y": 240,
+      "radius": 22,
+      "process_tag": "Pump_Running",
+      "color_on": "#27D17F",
+      "color_off": "#3A4250",
+      "blink": false,
+      "label": "泵运行"
+    },
+    {
+      "id": "LMP_FlowAnim",
+      "type": "Indicator",
+      "x": 170,
+      "y": 300,
+      "radius": 22,
+      "process_tag": "Flow_AnimActive",
+      "color_on": "#14E0B1",
+      "color_off": "#3A4250",
+      "blink": false,
+      "label": "流动状态"
+    },
+    {
+      "id": "IO_FlowAnimValue",
+      "type": "IOField",
+      "x": 170,
+      "y": 360,
+      "width": 120,
+      "height": 44,
+      "mode": "Output",
+      "process_tag": "Flow_Animation",
+      "font_size": 18,
+      "label": "动画值",
+      "display_format": "Decimal",
+      "decimal_digits": 0,
+      "unit": "%"
+    },
+    {
+      "id": "BTN_Start",
+      "type": "Button",
+      "x": 420,
+      "y": 95,
+      "width": 130,
+      "height": 56,
+      "text": "启动",
+      "press_script": "Sub_StartFlow",
+      "release_script": null,
+      "click_script": null,
+      "background_color": "#27D17F"
+    },
+    {
+      "id": "BTN_Stop",
+      "type": "Button",
+      "x": 580,
+      "y": 95,
+      "width": 130,
+      "height": 56,
+      "text": "停止",
+      "press_script": "Sub_StopFlow",
+      "release_script": null,
+      "click_script": null,
+      "background_color": "#E25563"
+    }
+  ],
+  "scripts": [
+    {
+      "name": "Sub_StartFlow",
+      "language": "VBS",
+      "purpose": "启动泵和流动动画模拟：泵运行置1，激活流动标志，循环步进画面动画值0~100共10秒后自动停止",
+      "code": "' 启动及流动模拟\nDim i\nSmartTags(\"Pump_Running\") = 1\nSmartTags(\"Flow_AnimActive\") = 1\nFor i = 1 To 40\n    SmartTags(\"Flow_Animation\") = (SmartTags(\"Flow_Animation\") + 5) Mod 101\n    HMIRuntime.Sleep 250\nNext\nSmartTags(\"Flow_AnimActive\") = 0\nSmartTags(\"Flow_Animation\") = 0\nSmartTags(\"Pump_Running\") = 0"
+    },
+    {
+      "name": "Sub_StopFlow",
+      "language": "VBS",
+      "purpose": "立即停止泵和流动动画",
+      "code": "' 停止泵和动画\nSmartTags(\"Pump_Running\") = 0\nSmartTags(\"Flow_AnimActive\") = 0\nSmartTags(\"Flow_Animation\") = 0"
+    }
+  ],
+  "_warnings": [],
+  "_screen_size": {
+    "width": 800,
+    "height": 480
+  }
+}

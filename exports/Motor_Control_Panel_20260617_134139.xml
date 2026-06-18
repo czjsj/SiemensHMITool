@@ -1,0 +1,277 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Document>
+  <Engineering version="V16"/>
+  <Screen Name="Motor_Control_Panel">
+    <AttributeList>
+      <Name>Motor_Control_Panel</Name>
+      <DisplayName>电机控制画面</DisplayName>
+      <Width>1280</Width>
+      <Height>800</Height>
+    </AttributeList>
+    <Tags>
+      <Tag Name="Start_Cmd" DataType="Bool">
+        <Address>%M10.0</Address>
+        <Comment>启动命令</Comment>
+      </Tag>
+      <Tag Name="Stop_Cmd" DataType="Bool">
+        <Address>%M10.1</Address>
+        <Comment>停止命令</Comment>
+      </Tag>
+      <Tag Name="Reset_Cmd" DataType="Bool">
+        <Address>%M10.2</Address>
+        <Comment>复位命令</Comment>
+      </Tag>
+      <Tag Name="Run_Status" DataType="Bool">
+        <Address>%M10.3</Address>
+        <Comment>运行状态</Comment>
+      </Tag>
+      <Tag Name="Fault_Status" DataType="Bool">
+        <Address>%M10.4</Address>
+        <Comment>故障状态</Comment>
+      </Tag>
+      <Tag Name="Speed_Act" DataType="Real">
+        <Address>%MD20</Address>
+        <Comment>实际转速</Comment>
+      </Tag>
+      <Tag Name="Mode_Select" DataType="Int">
+        <Address>%MW30</Address>
+        <Comment>运行模式(0停止/1手动/2自动)</Comment>
+      </Tag>
+    </Tags>
+    <TextLists>
+      <TextList Name="Mode_Text_List">
+        <Entry Value="0" Text="停止"/>
+        <Entry Value="1" Text="手动"/>
+        <Entry Value="2" Text="自动"/>
+      </TextList>
+    </TextLists>
+    <ObjectList>
+      <ScreenItem Name="TXT_Title" Type="TextField">
+        <Geometry>
+          <X>460</X>
+          <Y>30</Y>
+          <Width>360</Width>
+          <Height>44</Height>
+        </Geometry>
+        <Properties>
+          <Text>电机控制画面</Text>
+          <FontSize>26</FontSize>
+          <Bold>true</Bold>
+          <ForeColor>230,237,243</ForeColor>
+        </Properties>
+      </ScreenItem>
+      <ScreenItem Name="BTN_Start" Type="Button">
+        <Geometry>
+          <X>100</X>
+          <Y>120</Y>
+          <Width>140</Width>
+          <Height>56</Height>
+        </Geometry>
+        <Properties>
+          <Text>启动</Text>
+          <BackColor>43,182,115</BackColor>
+        </Properties>
+        <Events>
+          <Event Name="Press">
+            <VBSFunction>Sub_StartCmd</VBSFunction>
+          </Event>
+        </Events>
+      </ScreenItem>
+      <ScreenItem Name="BTN_Stop" Type="Button">
+        <Geometry>
+          <X>280</X>
+          <Y>120</Y>
+          <Width>140</Width>
+          <Height>56</Height>
+        </Geometry>
+        <Properties>
+          <Text>停止</Text>
+          <BackColor>226,85,99</BackColor>
+        </Properties>
+        <Events>
+          <Event Name="Press">
+            <VBSFunction>Sub_StopCmd</VBSFunction>
+          </Event>
+        </Events>
+      </ScreenItem>
+      <ScreenItem Name="BTN_Reset" Type="Button">
+        <Geometry>
+          <X>460</X>
+          <Y>120</Y>
+          <Width>140</Width>
+          <Height>56</Height>
+        </Geometry>
+        <Properties>
+          <Text>复位</Text>
+          <BackColor>58,66,80</BackColor>
+        </Properties>
+        <Events>
+          <Event Name="Press">
+            <VBSFunction>Sub_ResetCmd</VBSFunction>
+          </Event>
+        </Events>
+      </ScreenItem>
+      <ScreenItem Name="LMP_Run_lbl" Type="TextField">
+        <Geometry>
+          <X>610</X>
+          <Y>136</Y>
+          <Width>84</Width>
+          <Height>28</Height>
+        </Geometry>
+        <Properties>
+          <Text>运行</Text>
+          <FontSize>14</FontSize>
+          <Bold>false</Bold>
+          <ForeColor>201,211,222</ForeColor>
+        </Properties>
+      </ScreenItem>
+      <ScreenItem Name="LMP_Run" Type="Circle">
+        <Geometry>
+          <X>700</X>
+          <Y>128</Y>
+          <Width>44</Width>
+          <Height>44</Height>
+        </Geometry>
+        <Properties>
+          <FillColor>58,66,80</FillColor>
+          <BorderColor>120,130,140</BorderColor>
+        </Properties>
+        <Animations>
+          <ColorAnimation Tag="Run_Status">
+            <Range Value="0" FillColor="58,66,80"/>
+            <Range Value="1" FillColor="39,209,127"/>
+          </ColorAnimation>
+        </Animations>
+      </ScreenItem>
+      <ScreenItem Name="LMP_Fault_lbl" Type="TextField">
+        <Geometry>
+          <X>750</X>
+          <Y>136</Y>
+          <Width>84</Width>
+          <Height>28</Height>
+        </Geometry>
+        <Properties>
+          <Text>故障</Text>
+          <FontSize>14</FontSize>
+          <Bold>false</Bold>
+          <ForeColor>201,211,222</ForeColor>
+        </Properties>
+      </ScreenItem>
+      <ScreenItem Name="LMP_Fault" Type="Circle">
+        <Geometry>
+          <X>840</X>
+          <Y>128</Y>
+          <Width>44</Width>
+          <Height>44</Height>
+        </Geometry>
+        <Properties>
+          <FillColor>58,66,80</FillColor>
+          <BorderColor>120,130,140</BorderColor>
+        </Properties>
+        <Animations>
+          <ColorAnimation Tag="Fault_Status">
+            <Range Value="0" FillColor="58,66,80"/>
+            <Range Value="1" FillColor="226,85,99"/>
+          </ColorAnimation>
+          <FlashAnimation Tag="Fault_Status">
+            <Range Value="1" Flashing="Yes"/>
+          </FlashAnimation>
+        </Animations>
+      </ScreenItem>
+      <ScreenItem Name="IO_Speed_lbl" Type="TextField">
+        <Geometry>
+          <X>190</X>
+          <Y>308</Y>
+          <Width>84</Width>
+          <Height>28</Height>
+        </Geometry>
+        <Properties>
+          <Text>转速</Text>
+          <FontSize>14</FontSize>
+          <Bold>false</Bold>
+          <ForeColor>201,211,222</ForeColor>
+        </Properties>
+      </ScreenItem>
+      <ScreenItem Name="IO_Speed" Type="IOField">
+        <Geometry>
+          <X>280</X>
+          <Y>300</Y>
+          <Width>160</Width>
+          <Height>44</Height>
+        </Geometry>
+        <Properties>
+          <Mode>Output</Mode>
+          <OutputFormat>Decimal</OutputFormat>
+          <DecimalDigits>0</DecimalDigits>
+          <FontSize>18</FontSize>
+        </Properties>
+        <Connection>
+          <ProcessTag>Speed_Act</ProcessTag>
+        </Connection>
+      </ScreenItem>
+      <ScreenItem Name="IO_Speed_unit" Type="TextField">
+        <Geometry>
+          <X>446</X>
+          <Y>308</Y>
+          <Width>60</Width>
+          <Height>28</Height>
+        </Geometry>
+        <Properties>
+          <Text>rpm</Text>
+          <FontSize>14</FontSize>
+          <Bold>false</Bold>
+          <ForeColor>154,167,180</ForeColor>
+        </Properties>
+      </ScreenItem>
+      <ScreenItem Name="SIO_Mode_lbl" Type="TextField">
+        <Geometry>
+          <X>190</X>
+          <Y>388</Y>
+          <Width>84</Width>
+          <Height>28</Height>
+        </Geometry>
+        <Properties>
+          <Text>运行模式</Text>
+          <FontSize>14</FontSize>
+          <Bold>false</Bold>
+          <ForeColor>201,211,222</ForeColor>
+        </Properties>
+      </ScreenItem>
+      <ScreenItem Name="SIO_Mode" Type="SymbolicIOField">
+        <Geometry>
+          <X>280</X>
+          <Y>380</Y>
+          <Width>160</Width>
+          <Height>44</Height>
+        </Geometry>
+        <Properties>
+          <Mode>Output</Mode>
+          <FontSize>18</FontSize>
+          <TextList>Mode_Text_List</TextList>
+        </Properties>
+        <Connection>
+          <ProcessTag>Mode_Select</ProcessTag>
+        </Connection>
+      </ScreenItem>
+    </ObjectList>
+  </Screen>
+  <VBScripts>
+    <Script Name="Sub_StartCmd" Language="VBScript">
+      <Purpose>按下启动按钮，设置启动命令，复位停止命令</Purpose>
+      <Code>' 启动按钮按下
+SmartTags(&quot;Start_Cmd&quot;) = 1
+SmartTags(&quot;Stop_Cmd&quot;) = 0</Code>
+    </Script>
+    <Script Name="Sub_StopCmd" Language="VBScript">
+      <Purpose>按下停止按钮，设置停止命令，复位启动命令</Purpose>
+      <Code>' 停止按钮按下
+SmartTags(&quot;Stop_Cmd&quot;) = 1
+SmartTags(&quot;Start_Cmd&quot;) = 0</Code>
+    </Script>
+    <Script Name="Sub_ResetCmd" Language="VBScript">
+      <Purpose>按下复位按钮，置位复位命令（持续脉冲）</Purpose>
+      <Code>' 复位按钮按下：触发复位
+SmartTags(&quot;Reset_Cmd&quot;) = 1</Code>
+    </Script>
+  </VBScripts>
+</Document>

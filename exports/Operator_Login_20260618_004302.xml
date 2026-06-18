@@ -1,0 +1,194 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Document xmlns="http://www.siemens.com/automation/SimaticML">
+  <Engineering version="V16"/>
+  <Screen ID="ee5d1868-e59b-456c-ba49-54a2928d102e" Name="Operator_Login">
+    <AttributeList>
+      <Name>Operator_Login</Name>
+      <DisplayName>操作员登录</DisplayName>
+      <Width>1280</Width>
+      <Height>800</Height>
+    </AttributeList>
+    <Tags>
+      <Tag Name="Login_UserName" DataType="String">
+        <Comment>用户名输入</Comment>
+      </Tag>
+      <Tag Name="Login_Password" DataType="String">
+        <Comment>密码输入</Comment>
+      </Tag>
+      <Tag Name="Login_Status" DataType="Bool">
+        <Comment>在线状态（1=在线，0=离线）</Comment>
+      </Tag>
+    </Tags>
+    <ObjectList>
+      <ScreenItem ID="00644c21-6480-4624-b1f8-55d97a8874b8" Name="TXT_Title" Type="TextField">
+      <Geometry>
+      <X>440</X>
+      <Y>40</Y>
+      <Width>400</Width>
+      <Height>50</Height>
+      </Geometry>
+      <Properties>
+      <Text>操作员登录</Text>
+      <FontSize>28</FontSize>
+      <Bold>true</Bold>
+      <ForeColor>230,237,243</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="cad8273e-e929-4ac5-b848-af85e56cc57c" Name="TXT_Username" Type="TextField">
+      <Geometry>
+      <X>340</X>
+      <Y>180</Y>
+      <Width>100</Width>
+      <Height>36</Height>
+      </Geometry>
+      <Properties>
+      <Text>用户名</Text>
+      <FontSize>18</FontSize>
+      <Bold>false</Bold>
+      <ForeColor>230,237,243</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="337f6efc-93b4-4f12-93b5-6b2d0caa099e" Name="IO_Username" Type="IOField">
+      <Geometry>
+      <X>460</X>
+      <Y>180</Y>
+      <Width>200</Width>
+      <Height>40</Height>
+      </Geometry>
+      <Properties>
+      <Mode>Input</Mode>
+      <OutputFormat>String</OutputFormat>
+      <DecimalDigits>0</DecimalDigits>
+      <FontSize>18</FontSize>
+      </Properties>
+      <Connection>
+      <ProcessTag>Login_UserName</ProcessTag>
+      </Connection>
+      </ScreenItem>
+      <ScreenItem ID="10a6aaf0-23da-4a81-afc7-984b07641e2c" Name="TXT_Password" Type="TextField">
+      <Geometry>
+      <X>340</X>
+      <Y>260</Y>
+      <Width>100</Width>
+      <Height>36</Height>
+      </Geometry>
+      <Properties>
+      <Text>密码</Text>
+      <FontSize>18</FontSize>
+      <Bold>false</Bold>
+      <ForeColor>230,237,243</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="77a7f967-2705-4027-a15d-0556a6615099" Name="IO_Password" Type="IOField">
+      <Geometry>
+      <X>460</X>
+      <Y>260</Y>
+      <Width>200</Width>
+      <Height>40</Height>
+      </Geometry>
+      <Properties>
+      <Mode>Input</Mode>
+      <OutputFormat>String</OutputFormat>
+      <DecimalDigits>0</DecimalDigits>
+      <FontSize>18</FontSize>
+      </Properties>
+      <Connection>
+      <ProcessTag>Login_Password</ProcessTag>
+      </Connection>
+      </ScreenItem>
+      <ScreenItem ID="010c6be9-bce3-4a63-9185-2af316bf1e43" Name="BTN_Login" Type="Button">
+      <Geometry>
+      <X>400</X>
+      <Y>380</Y>
+      <Width>120</Width>
+      <Height>50</Height>
+      </Geometry>
+      <Properties>
+      <Text>登录</Text>
+      <BackColor>39,209,127</BackColor>
+      </Properties>
+      <Events>
+      <Event Name="Click">
+      <VBSFunction>Sub_Login</VBSFunction>
+      </Event>
+      </Events>
+      </ScreenItem>
+      <ScreenItem ID="09e7ea6d-88b3-46fb-a351-e899cfb16595" Name="BTN_Logout" Type="Button">
+      <Geometry>
+      <X>560</X>
+      <Y>380</Y>
+      <Width>120</Width>
+      <Height>50</Height>
+      </Geometry>
+      <Properties>
+      <Text>退出</Text>
+      <BackColor>226,85,99</BackColor>
+      </Properties>
+      <Events>
+      <Event Name="Click">
+      <VBSFunction>Sub_Logout</VBSFunction>
+      </Event>
+      </Events>
+      </ScreenItem>
+      <ScreenItem ID="f8df3014-0f60-4c18-9d1a-aea2f3f58214" Name="LMP_Online_lbl" Type="TextField">
+      <Geometry>
+      <X>670</X>
+      <Y>208</Y>
+      <Width>84</Width>
+      <Height>28</Height>
+      </Geometry>
+      <Properties>
+      <Text>在线状态</Text>
+      <FontSize>14</FontSize>
+      <Bold>false</Bold>
+      <ForeColor>201,211,222</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="f60a18e0-255e-4c42-9287-af5999100854" Name="LMP_Online" Type="Circle">
+      <Geometry>
+      <X>760</X>
+      <Y>200</Y>
+      <Width>60</Width>
+      <Height>60</Height>
+      </Geometry>
+      <Properties>
+      <FillColor>58,66,80</FillColor>
+      <BorderColor>120,130,140</BorderColor>
+      </Properties>
+      <Animations>
+      <ColorAnimation Tag="Login_Status">
+      <Range Value="0" FillColor="58,66,80"/>
+      <Range Value="1" FillColor="39,209,127"/>
+      </ColorAnimation>
+      </Animations>
+      </ScreenItem>
+    </ObjectList>
+  </Screen>
+  <VBScripts>
+    <Script Name="Sub_Login" Language="VBS">
+      <Purpose>校验用户名密码：admin/123456，成功置位在线标志并提示，失败提示</Purpose>
+      <Code>
+        ' 登录按钮：校验用户名密码
+Dim sUser, sPass
+sUser = SmartTags("Login_UserName")
+sPass = SmartTags("Login_Password")
+If sUser = "admin" And sPass = "123456" Then
+    SmartTags("Login_Status") = 1
+    HMIRuntime.Trace "登录成功"
+    ShowSystemAlarm "登录成功"
+Else
+    SmartTags("Login_Status") = 0
+    ShowSystemAlarm "用户名或密码错误"
+End If
+      </Code>
+    </Script>
+    <Script Name="Sub_Logout" Language="VBS">
+      <Purpose>退出登录：清除在线状态并提示</Purpose>
+      <Code>
+        ' 退出按钮：清除在线标志
+SmartTags("Login_Status") = 0
+ShowSystemAlarm "已退出登录"
+      </Code>
+    </Script>
+  </VBScripts>
+</Document>

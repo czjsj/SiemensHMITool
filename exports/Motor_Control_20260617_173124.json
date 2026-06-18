@@ -1,0 +1,229 @@
+{
+  "meta": {
+    "screen_name": "Motor_Control",
+    "title": "电机控制画面",
+    "description": "电机启停控制：启动、停止、复位按钮，运行指示灯（绿色常亮）、故障指示灯（红色闪烁），转速显示（rpm），运行模式显示（停止/手动/自动）。假设变量已存在于PLC。",
+    "resolution": "1280x800",
+    "hmi_type": "Comfort",
+    "generation_mode": "auto",
+    "template_screen": "",
+    "template_xml": ""
+  },
+  "tags": [
+    {
+      "name": "Motor_Start",
+      "data_type": "Bool",
+      "address": "%M0.0",
+      "comment": "启动命令"
+    },
+    {
+      "name": "Motor_Stop",
+      "data_type": "Bool",
+      "address": "%M0.1",
+      "comment": "停止命令"
+    },
+    {
+      "name": "Motor_Reset",
+      "data_type": "Bool",
+      "address": "%M0.2",
+      "comment": "复位命令"
+    },
+    {
+      "name": "Motor_Running",
+      "data_type": "Bool",
+      "address": "%M0.3",
+      "comment": "运行状态"
+    },
+    {
+      "name": "Motor_Fault",
+      "data_type": "Bool",
+      "address": "%M0.4",
+      "comment": "故障状态"
+    },
+    {
+      "name": "Motor_Speed",
+      "data_type": "Real",
+      "address": "%MD10",
+      "comment": "电机转速"
+    },
+    {
+      "name": "Motor_Mode",
+      "data_type": "Int",
+      "address": "%MW20",
+      "comment": "运行模式（0=停止，1=手动，2=自动）"
+    }
+  ],
+  "text_lists": [
+    {
+      "name": "Motor_Mode_List",
+      "entries": [
+        {
+          "value": 0,
+          "text": "停止"
+        },
+        {
+          "value": 1,
+          "text": "手动"
+        },
+        {
+          "value": 2,
+          "text": "自动"
+        }
+      ]
+    }
+  ],
+  "objects": [
+    {
+      "id": "TXT_Title",
+      "type": "Text",
+      "x": 480,
+      "y": 30,
+      "width": 320,
+      "height": 40,
+      "text": "电机控制画面",
+      "font_size": 24,
+      "bold": true,
+      "color": "#E6EDF3"
+    },
+    {
+      "id": "BTN_Start",
+      "type": "Button",
+      "x": 150,
+      "y": 140,
+      "width": 120,
+      "height": 50,
+      "text": "启动",
+      "press_script": "Sub_Start",
+      "release_script": null,
+      "click_script": null,
+      "background_color": "#27D17F"
+    },
+    {
+      "id": "BTN_Stop",
+      "type": "Button",
+      "x": 310,
+      "y": 140,
+      "width": 120,
+      "height": 50,
+      "text": "停止",
+      "press_script": "Sub_Stop",
+      "release_script": null,
+      "click_script": null,
+      "background_color": "#E25563"
+    },
+    {
+      "id": "BTN_Reset",
+      "type": "Button",
+      "x": 470,
+      "y": 140,
+      "width": 120,
+      "height": 50,
+      "text": "复位",
+      "press_script": "Sub_Reset",
+      "release_script": null,
+      "click_script": null,
+      "background_color": "#3A4250"
+    },
+    {
+      "id": "LMP_Run",
+      "type": "Indicator",
+      "x": 760,
+      "y": 150,
+      "radius": 24,
+      "process_tag": "Motor_Running",
+      "color_on": "#27D17F",
+      "color_off": "#3A4250",
+      "blink": false,
+      "label": "运行"
+    },
+    {
+      "id": "LMP_Fault",
+      "type": "Indicator",
+      "x": 920,
+      "y": 150,
+      "radius": 24,
+      "process_tag": "Motor_Fault",
+      "color_on": "#E25563",
+      "color_off": "#3A4250",
+      "blink": true,
+      "label": "故障"
+    },
+    {
+      "id": "TXT_SpeedLabel",
+      "type": "Text",
+      "x": 180,
+      "y": 300,
+      "width": 80,
+      "height": 30,
+      "text": "转速",
+      "font_size": 16,
+      "bold": false,
+      "color": "#E6EDF3"
+    },
+    {
+      "id": "IO_Speed",
+      "type": "IOField",
+      "x": 280,
+      "y": 290,
+      "width": 160,
+      "height": 44,
+      "mode": "Output",
+      "process_tag": "Motor_Speed",
+      "font_size": 18,
+      "label": null,
+      "display_format": "Decimal",
+      "decimal_digits": 1,
+      "unit": "rpm"
+    },
+    {
+      "id": "TXT_ModeLabel",
+      "type": "Text",
+      "x": 180,
+      "y": 380,
+      "width": 80,
+      "height": 30,
+      "text": "运行模式",
+      "font_size": 16,
+      "bold": false,
+      "color": "#E6EDF3"
+    },
+    {
+      "id": "SIO_Mode",
+      "type": "SymbolicIOField",
+      "x": 280,
+      "y": 370,
+      "width": 180,
+      "height": 44,
+      "mode": "Output",
+      "process_tag": "Motor_Mode",
+      "font_size": 18,
+      "label": null,
+      "text_list": "Motor_Mode_List"
+    }
+  ],
+  "scripts": [
+    {
+      "name": "Sub_Start",
+      "language": "VBS",
+      "purpose": "按下启动按钮：置位启动命令，清除停止命令",
+      "code": "' Sub_Start - 电机启动\nSmartTags(\"Motor_Start\") = 1\nSmartTags(\"Motor_Stop\") = 0"
+    },
+    {
+      "name": "Sub_Stop",
+      "language": "VBS",
+      "purpose": "按下停止按钮：置位停止命令，清除启动命令",
+      "code": "' Sub_Stop - 电机停止\nSmartTags(\"Motor_Stop\") = 1\nSmartTags(\"Motor_Start\") = 0"
+    },
+    {
+      "name": "Sub_Reset",
+      "language": "VBS",
+      "purpose": "按下复位按钮：复位故障标志",
+      "code": "' Sub_Reset - 故障复位\nSmartTags(\"Motor_Reset\") = 1"
+    }
+  ],
+  "_warnings": [],
+  "_screen_size": {
+    "width": 1280,
+    "height": 800
+  }
+}

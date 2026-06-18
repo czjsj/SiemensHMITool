@@ -1,0 +1,367 @@
+{
+  "meta": {
+    "screen_name": "Temperature_Monitor",
+    "title": "温度监控画面",
+    "description": "显示三个测点的温度及超温报警，每个测点配有复位按钮，系统整体状态用符号IO域显示。修正：增加单位标签、调整垂直间距、指示灯颜色差异化。",
+    "resolution": "1280x800",
+    "hmi_type": "Comfort",
+    "generation_mode": "auto",
+    "template_screen": "",
+    "template_xml": ""
+  },
+  "tags": [
+    {
+      "name": "Temp_Point1",
+      "data_type": "Real",
+      "address": "%MD100",
+      "comment": "测点1温度"
+    },
+    {
+      "name": "Temp_Point2",
+      "data_type": "Real",
+      "address": "%MD104",
+      "comment": "测点2温度"
+    },
+    {
+      "name": "Temp_Point3",
+      "data_type": "Real",
+      "address": "%MD108",
+      "comment": "测点3温度"
+    },
+    {
+      "name": "Alarm_OH1",
+      "data_type": "Bool",
+      "address": "%M10.0",
+      "comment": "测点1超温报警"
+    },
+    {
+      "name": "Alarm_OH2",
+      "data_type": "Bool",
+      "address": "%M10.1",
+      "comment": "测点2超温报警"
+    },
+    {
+      "name": "Alarm_OH3",
+      "data_type": "Bool",
+      "address": "%M10.2",
+      "comment": "测点3超温报警"
+    },
+    {
+      "name": "Reset_Alarm1",
+      "data_type": "Bool",
+      "address": "%M11.0",
+      "comment": "复位测点1报警"
+    },
+    {
+      "name": "Reset_Alarm2",
+      "data_type": "Bool",
+      "address": "%M11.1",
+      "comment": "复位测点2报警"
+    },
+    {
+      "name": "Reset_Alarm3",
+      "data_type": "Bool",
+      "address": "%M11.2",
+      "comment": "复位测点3报警"
+    },
+    {
+      "name": "Sys_Status",
+      "data_type": "Int",
+      "address": "%MW30",
+      "comment": "系统状态:0正常1警告2故障"
+    }
+  ],
+  "text_lists": [
+    {
+      "name": "Sys_Status_List",
+      "entries": [
+        {
+          "value": 0,
+          "text": "正常"
+        },
+        {
+          "value": 1,
+          "text": "警告"
+        },
+        {
+          "value": 2,
+          "text": "故障"
+        }
+      ]
+    }
+  ],
+  "objects": [
+    {
+      "id": "TXT_Title",
+      "type": "Text",
+      "x": 460,
+      "y": 30,
+      "width": 360,
+      "height": 44,
+      "text": "温度监控画面",
+      "font_size": 26,
+      "bold": true,
+      "color": "#E6EDF3"
+    },
+    {
+      "id": "TXT_Point1",
+      "type": "Text",
+      "x": 100,
+      "y": 140,
+      "width": 120,
+      "height": 40,
+      "text": "测点1",
+      "font_size": 18,
+      "bold": false,
+      "color": "#E6EDF3"
+    },
+    {
+      "id": "IO_Temp1",
+      "type": "IOField",
+      "x": 240,
+      "y": 140,
+      "width": 140,
+      "height": 44,
+      "mode": "Output",
+      "process_tag": "Temp_Point1",
+      "font_size": 18,
+      "label": null,
+      "display_format": "Decimal",
+      "decimal_digits": 1,
+      "unit": "℃"
+    },
+    {
+      "id": "TXT_Unit1",
+      "type": "Text",
+      "x": 385,
+      "y": 148,
+      "width": 30,
+      "height": 36,
+      "text": "℃",
+      "font_size": 18,
+      "bold": false,
+      "color": "#E6EDF3"
+    },
+    {
+      "id": "LMP_OH1",
+      "type": "Indicator",
+      "x": 430,
+      "y": 148,
+      "radius": 20,
+      "process_tag": "Alarm_OH1",
+      "color_on": "#E25563",
+      "color_off": "#52C41A",
+      "blink": true,
+      "label": "超温"
+    },
+    {
+      "id": "BTN_Reset1",
+      "type": "Button",
+      "x": 540,
+      "y": 140,
+      "width": 100,
+      "height": 44,
+      "text": "复位",
+      "press_script": "Sub_Reset1_Press",
+      "release_script": "Sub_Reset1_Release",
+      "click_script": null,
+      "background_color": "#3A4250"
+    },
+    {
+      "id": "TXT_Point2",
+      "type": "Text",
+      "x": 100,
+      "y": 300,
+      "width": 120,
+      "height": 40,
+      "text": "测点2",
+      "font_size": 18,
+      "bold": false,
+      "color": "#E6EDF3"
+    },
+    {
+      "id": "IO_Temp2",
+      "type": "IOField",
+      "x": 240,
+      "y": 300,
+      "width": 140,
+      "height": 44,
+      "mode": "Output",
+      "process_tag": "Temp_Point2",
+      "font_size": 18,
+      "label": null,
+      "display_format": "Decimal",
+      "decimal_digits": 1,
+      "unit": "℃"
+    },
+    {
+      "id": "TXT_Unit2",
+      "type": "Text",
+      "x": 385,
+      "y": 308,
+      "width": 30,
+      "height": 36,
+      "text": "℃",
+      "font_size": 18,
+      "bold": false,
+      "color": "#E6EDF3"
+    },
+    {
+      "id": "LMP_OH2",
+      "type": "Indicator",
+      "x": 430,
+      "y": 308,
+      "radius": 20,
+      "process_tag": "Alarm_OH2",
+      "color_on": "#E25563",
+      "color_off": "#FADB14",
+      "blink": true,
+      "label": "超温"
+    },
+    {
+      "id": "BTN_Reset2",
+      "type": "Button",
+      "x": 540,
+      "y": 300,
+      "width": 100,
+      "height": 44,
+      "text": "复位",
+      "press_script": "Sub_Reset2_Press",
+      "release_script": "Sub_Reset2_Release",
+      "click_script": null,
+      "background_color": "#3A4250"
+    },
+    {
+      "id": "TXT_Point3",
+      "type": "Text",
+      "x": 100,
+      "y": 460,
+      "width": 120,
+      "height": 40,
+      "text": "测点3",
+      "font_size": 18,
+      "bold": false,
+      "color": "#E6EDF3"
+    },
+    {
+      "id": "IO_Temp3",
+      "type": "IOField",
+      "x": 240,
+      "y": 460,
+      "width": 140,
+      "height": 44,
+      "mode": "Output",
+      "process_tag": "Temp_Point3",
+      "font_size": 18,
+      "label": null,
+      "display_format": "Decimal",
+      "decimal_digits": 1,
+      "unit": "℃"
+    },
+    {
+      "id": "TXT_Unit3",
+      "type": "Text",
+      "x": 385,
+      "y": 468,
+      "width": 30,
+      "height": 36,
+      "text": "℃",
+      "font_size": 18,
+      "bold": false,
+      "color": "#E6EDF3"
+    },
+    {
+      "id": "LMP_OH3",
+      "type": "Indicator",
+      "x": 430,
+      "y": 468,
+      "radius": 20,
+      "process_tag": "Alarm_OH3",
+      "color_on": "#E25563",
+      "color_off": "#3A4250",
+      "blink": true,
+      "label": "超温"
+    },
+    {
+      "id": "BTN_Reset3",
+      "type": "Button",
+      "x": 540,
+      "y": 460,
+      "width": 100,
+      "height": 44,
+      "text": "复位",
+      "press_script": "Sub_Reset3_Press",
+      "release_script": "Sub_Reset3_Release",
+      "click_script": null,
+      "background_color": "#3A4250"
+    },
+    {
+      "id": "TXT_Status",
+      "type": "Text",
+      "x": 800,
+      "y": 140,
+      "width": 120,
+      "height": 40,
+      "text": "系统状态",
+      "font_size": 18,
+      "bold": false,
+      "color": "#E6EDF3"
+    },
+    {
+      "id": "SIO_Status",
+      "type": "SymbolicIOField",
+      "x": 930,
+      "y": 140,
+      "width": 160,
+      "height": 44,
+      "mode": "Output",
+      "process_tag": "Sys_Status",
+      "font_size": 18,
+      "label": null,
+      "text_list": "Sys_Status_List"
+    }
+  ],
+  "scripts": [
+    {
+      "name": "Sub_Reset1_Press",
+      "language": "VBS",
+      "purpose": "按下复位1按钮，置位复位变量",
+      "code": "' 复位测点1报警\nSmartTags(\"Reset_Alarm1\") = 1"
+    },
+    {
+      "name": "Sub_Reset1_Release",
+      "language": "VBS",
+      "purpose": "释放复位1按钮，清零复位变量",
+      "code": "' 复位测点1报警释放\nSmartTags(\"Reset_Alarm1\") = 0"
+    },
+    {
+      "name": "Sub_Reset2_Press",
+      "language": "VBS",
+      "purpose": "按下复位2按钮，置位复位变量",
+      "code": "SmartTags(\"Reset_Alarm2\") = 1"
+    },
+    {
+      "name": "Sub_Reset2_Release",
+      "language": "VBS",
+      "purpose": "释放复位2按钮，清零复位变量",
+      "code": "SmartTags(\"Reset_Alarm2\") = 0"
+    },
+    {
+      "name": "Sub_Reset3_Press",
+      "language": "VBS",
+      "purpose": "按下复位3按钮，置位复位变量",
+      "code": "SmartTags(\"Reset_Alarm3\") = 1"
+    },
+    {
+      "name": "Sub_Reset3_Release",
+      "language": "VBS",
+      "purpose": "释放复位3按钮，清零复位变量",
+      "code": "SmartTags(\"Reset_Alarm3\") = 0"
+    }
+  ],
+  "_warnings": [],
+  "_screen_size": {
+    "width": 1280,
+    "height": 800
+  }
+}

@@ -1,0 +1,426 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Document xmlns="http://www.siemens.com/automation/SimaticML">
+  <Engineering version="V16" />
+  <Screen ID="8285d0f3-26f4-4777-be66-699441604515" Name="Temp_Monitor">
+    <AttributeList>
+      <Name>Temp_Monitor</Name>
+      <DisplayName>温度监控画面</DisplayName>
+      <Width>800</Width>
+      <Height>480</Height>
+    </AttributeList>
+    <Tags>
+      <Tag Name="Temperature_1" DataType="Real">
+        <Address>%MD100</Address>
+        <Comment>测点1温度</Comment>
+      </Tag>
+      <Tag Name="Temperature_2" DataType="Real">
+        <Address>%MD104</Address>
+        <Comment>测点2温度</Comment>
+      </Tag>
+      <Tag Name="Temperature_3" DataType="Real">
+        <Address>%MD108</Address>
+        <Comment>测点3温度</Comment>
+      </Tag>
+      <Tag Name="Alarm_1" DataType="Bool">
+        <Address>%M1.0</Address>
+        <Comment>测点1超温报警</Comment>
+      </Tag>
+      <Tag Name="Alarm_2" DataType="Bool">
+        <Address>%M1.1</Address>
+        <Comment>测点2超温报警</Comment>
+      </Tag>
+      <Tag Name="Alarm_3" DataType="Bool">
+        <Address>%M1.2</Address>
+        <Comment>测点3超温报警</Comment>
+      </Tag>
+      <Tag Name="Alarm_Reset" DataType="Bool">
+        <Address>%M1.3</Address>
+        <Comment>复位所有报警</Comment>
+      </Tag>
+      <Tag Name="System_Status" DataType="Int">
+        <Address>%MW30</Address>
+        <Comment>系统状态：0正常/1警告/2故障</Comment>
+      </Tag>
+    </Tags>
+    <TextLists>
+      <TextList Name="System_Status_List">
+        <Entry Value="0" Text="正常" />
+        <Entry Value="1" Text="警告" />
+        <Entry Value="2" Text="故障" />
+      </TextList>
+    </TextLists>
+    <ObjectList>
+      <ScreenItem ID="a501f656-5137-4034-874e-0e8ac6bc2593" Name="TXT_Title" Type="TextField">
+      <Geometry>
+      <X>260</X>
+      <Y>20</Y>
+      <Width>280</Width>
+      <Height>40</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>dc8ab201-1662-4acc-999e-467b349d7c2d</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">温度监控画面</Text>
+</MultilingualText>
+      </Text>
+      <FontSize>22</FontSize>
+      <Bold>true</Bold>
+      <ForeColor>230,237,243</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="5d4a81f2-974f-4ac7-bbeb-576c26c02957" Name="IO_Temp1_lbl" Type="TextField">
+      <Geometry>
+      <X>90</X>
+      <Y>93</Y>
+      <Width>84</Width>
+      <Height>28</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>cb70a5fa-0d37-45e9-91d8-d550e2855389</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">测点1温度</Text>
+</MultilingualText>
+      </Text>
+      <FontSize>14</FontSize>
+      <Bold>false</Bold>
+      <ForeColor>201,211,222</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="80949a8d-1325-4f2b-8d68-f0ad72971960" Name="IO_Temp1" Type="IOField">
+      <Geometry>
+      <X>180</X>
+      <Y>85</Y>
+      <Width>100</Width>
+      <Height>40</Height>
+      </Geometry>
+      <Properties>
+      <Mode>Output</Mode>
+      <OutputFormat>Decimal</OutputFormat>
+      <DecimalDigits>1</DecimalDigits>
+      <FontSize>18</FontSize>
+      </Properties>
+      <Connection>
+      <ProcessTag>Temperature_1</ProcessTag>
+      </Connection>
+      </ScreenItem>
+      <ScreenItem ID="4168a496-30e4-45f2-b05f-eb12c14c1ca8" Name="IO_Temp1_unit" Type="TextField">
+      <Geometry>
+      <X>286</X>
+      <Y>93</Y>
+      <Width>60</Width>
+      <Height>28</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>70120d91-8725-4d2c-a072-3780dcb1860e</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">℃</Text>
+</MultilingualText>
+      </Text>
+      <FontSize>14</FontSize>
+      <Bold>false</Bold>
+      <ForeColor>154,167,180</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="42adf016-25e4-4f30-8323-657279132529" Name="LMP_Alarm1_lbl" Type="TextField">
+      <Geometry>
+      <X>250</X>
+      <Y>93</Y>
+      <Width>84</Width>
+      <Height>28</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>80cbd57f-3182-4431-86be-8a7807e9e5ef</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">超温</Text>
+</MultilingualText>
+      </Text>
+      <FontSize>14</FontSize>
+      <Bold>false</Bold>
+      <ForeColor>201,211,222</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="4c38a187-8967-4b46-8b82-9deed52ec796" Name="LMP_Alarm1" Type="Circle">
+      <Geometry>
+      <X>340</X>
+      <Y>85</Y>
+      <Width>36</Width>
+      <Height>36</Height>
+      </Geometry>
+      <Properties>
+      <FillColor>58,66,80</FillColor>
+      <BorderColor>120,130,140</BorderColor>
+      </Properties>
+      <Animations>
+      <ColorAnimation Tag="Alarm_1">
+      <Range Value="0" FillColor="58,66,80" />
+      <Range Value="1" FillColor="226,85,99" />
+      </ColorAnimation>
+      <FlashAnimation Tag="Alarm_1">
+      <Range Value="1" Flashing="Yes" />
+      </FlashAnimation>
+      </Animations>
+      </ScreenItem>
+      <ScreenItem ID="0b8756d5-01ac-4906-b704-baa060dd614f" Name="IO_Temp2_lbl" Type="TextField">
+      <Geometry>
+      <X>90</X>
+      <Y>163</Y>
+      <Width>84</Width>
+      <Height>28</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>aca97db5-12da-4e38-86bd-5b6b38af2aa8</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">测点2温度</Text>
+</MultilingualText>
+      </Text>
+      <FontSize>14</FontSize>
+      <Bold>false</Bold>
+      <ForeColor>201,211,222</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="98702633-15c5-4978-a8f5-2ad4111f7fee" Name="IO_Temp2" Type="IOField">
+      <Geometry>
+      <X>180</X>
+      <Y>155</Y>
+      <Width>100</Width>
+      <Height>40</Height>
+      </Geometry>
+      <Properties>
+      <Mode>Output</Mode>
+      <OutputFormat>Decimal</OutputFormat>
+      <DecimalDigits>1</DecimalDigits>
+      <FontSize>18</FontSize>
+      </Properties>
+      <Connection>
+      <ProcessTag>Temperature_2</ProcessTag>
+      </Connection>
+      </ScreenItem>
+      <ScreenItem ID="c8122e10-d4b9-4c49-95f0-3c95b1e51146" Name="IO_Temp2_unit" Type="TextField">
+      <Geometry>
+      <X>286</X>
+      <Y>163</Y>
+      <Width>60</Width>
+      <Height>28</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>9c9cf87e-e18e-441d-b187-585304c4b530</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">℃</Text>
+</MultilingualText>
+      </Text>
+      <FontSize>14</FontSize>
+      <Bold>false</Bold>
+      <ForeColor>154,167,180</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="24ffb659-c4d9-4912-80f1-6568021dd3ae" Name="LMP_Alarm2_lbl" Type="TextField">
+      <Geometry>
+      <X>250</X>
+      <Y>163</Y>
+      <Width>84</Width>
+      <Height>28</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>4d1b5598-cb44-438d-8116-faf1deb8fd9e</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">超温</Text>
+</MultilingualText>
+      </Text>
+      <FontSize>14</FontSize>
+      <Bold>false</Bold>
+      <ForeColor>201,211,222</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="140fdbc4-7723-488e-a16b-94d276d652c4" Name="LMP_Alarm2" Type="Circle">
+      <Geometry>
+      <X>340</X>
+      <Y>155</Y>
+      <Width>36</Width>
+      <Height>36</Height>
+      </Geometry>
+      <Properties>
+      <FillColor>58,66,80</FillColor>
+      <BorderColor>120,130,140</BorderColor>
+      </Properties>
+      <Animations>
+      <ColorAnimation Tag="Alarm_2">
+      <Range Value="0" FillColor="58,66,80" />
+      <Range Value="1" FillColor="226,85,99" />
+      </ColorAnimation>
+      <FlashAnimation Tag="Alarm_2">
+      <Range Value="1" Flashing="Yes" />
+      </FlashAnimation>
+      </Animations>
+      </ScreenItem>
+      <ScreenItem ID="cd2d9610-fc76-4f6a-bd94-e071fce8b86f" Name="IO_Temp3_lbl" Type="TextField">
+      <Geometry>
+      <X>90</X>
+      <Y>233</Y>
+      <Width>84</Width>
+      <Height>28</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>45b815ef-da84-432d-bce0-c5257c6b89ee</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">测点3温度</Text>
+</MultilingualText>
+      </Text>
+      <FontSize>14</FontSize>
+      <Bold>false</Bold>
+      <ForeColor>201,211,222</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="4de960c4-40ae-4b5b-bede-584e15b28184" Name="IO_Temp3" Type="IOField">
+      <Geometry>
+      <X>180</X>
+      <Y>225</Y>
+      <Width>100</Width>
+      <Height>40</Height>
+      </Geometry>
+      <Properties>
+      <Mode>Output</Mode>
+      <OutputFormat>Decimal</OutputFormat>
+      <DecimalDigits>1</DecimalDigits>
+      <FontSize>18</FontSize>
+      </Properties>
+      <Connection>
+      <ProcessTag>Temperature_3</ProcessTag>
+      </Connection>
+      </ScreenItem>
+      <ScreenItem ID="06ac8e31-6008-43d6-a247-ec216d801861" Name="IO_Temp3_unit" Type="TextField">
+      <Geometry>
+      <X>286</X>
+      <Y>233</Y>
+      <Width>60</Width>
+      <Height>28</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>ed5c8c4e-9af3-4902-b34f-ae10924fadda</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">℃</Text>
+</MultilingualText>
+      </Text>
+      <FontSize>14</FontSize>
+      <Bold>false</Bold>
+      <ForeColor>154,167,180</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="32cf1ba6-874e-494b-9868-c206cebf44b7" Name="LMP_Alarm3_lbl" Type="TextField">
+      <Geometry>
+      <X>250</X>
+      <Y>233</Y>
+      <Width>84</Width>
+      <Height>28</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>c5c938c6-be78-4b21-8d2d-37c9d0b4a790</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">超温</Text>
+</MultilingualText>
+      </Text>
+      <FontSize>14</FontSize>
+      <Bold>false</Bold>
+      <ForeColor>201,211,222</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="9c512485-ab50-4a5d-bddd-33c46ec8a847" Name="LMP_Alarm3" Type="Circle">
+      <Geometry>
+      <X>340</X>
+      <Y>225</Y>
+      <Width>36</Width>
+      <Height>36</Height>
+      </Geometry>
+      <Properties>
+      <FillColor>58,66,80</FillColor>
+      <BorderColor>120,130,140</BorderColor>
+      </Properties>
+      <Animations>
+      <ColorAnimation Tag="Alarm_3">
+      <Range Value="0" FillColor="58,66,80" />
+      <Range Value="1" FillColor="226,85,99" />
+      </ColorAnimation>
+      <FlashAnimation Tag="Alarm_3">
+      <Range Value="1" Flashing="Yes" />
+      </FlashAnimation>
+      </Animations>
+      </ScreenItem>
+      <ScreenItem ID="5e238907-a33b-4fc2-942e-dfa21f675dc6" Name="TXT_StatusLabel" Type="TextField">
+      <Geometry>
+      <X>30</X>
+      <Y>340</Y>
+      <Width>80</Width>
+      <Height>40</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>777e2cc3-e592-4336-997a-fe608ee42bdb</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">系统状态</Text>
+</MultilingualText>
+      </Text>
+      <FontSize>16</FontSize>
+      <Bold>false</Bold>
+      <ForeColor>230,237,243</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="0c6c01dd-f741-4331-9299-5412668b34d7" Name="SIO_Status" Type="SymbolicIOField">
+      <Geometry>
+      <X>120</X>
+      <Y>340</Y>
+      <Width>120</Width>
+      <Height>40</Height>
+      </Geometry>
+      <Properties>
+      <Mode>Output</Mode>
+      <FontSize>16</FontSize>
+      <TextList>System_Status_List</TextList>
+      </Properties>
+      <Connection>
+      <ProcessTag>System_Status</ProcessTag>
+      </Connection>
+      </ScreenItem>
+      <ScreenItem ID="c69d932e-5493-4b1a-8476-cb3d8eeceb31" Name="BTN_ResetAlarm" Type="Button">
+      <Geometry>
+      <X>400</X>
+      <Y>340</Y>
+      <Width>120</Width>
+      <Height>50</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>cbaa22f0-4722-48c3-8769-e368938505f8</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">复位报警</Text>
+</MultilingualText>
+      </Text>
+      <BackColor>58,66,80</BackColor>
+      </Properties>
+      <Events>
+      <Event Name="Press">
+      <VBSFunction>Sub_ResetAlarm</VBSFunction>
+      </Event>
+      </Events>
+      </ScreenItem>
+    </ObjectList>
+  </Screen>
+  <VBScripts>
+    
+      <Purpose>复位所有报警：置位复位变量</Purpose>
+      
+        ' 按下复位报警按钮，发出复位命令
+SmartTags("Alarm_Reset") = 1
+' 延时或脉冲由PLC处理，此处只写一次
+      
+    
+  </VBScripts>
+</Document>

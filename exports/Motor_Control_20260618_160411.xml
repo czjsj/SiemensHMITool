@@ -1,0 +1,350 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Document xmlns="http://www.siemens.com/automation/SimaticML">
+  <Engineering version="V16" />
+  <Screen ID="8b74fecf-7ab9-44f8-a173-d43eddef8fe6" Name="Motor_Control">
+    <AttributeList>
+      <Name>Motor_Control</Name>
+      <DisplayName>电机控制画面</DisplayName>
+      <Width>1280</Width>
+      <Height>800</Height>
+    </AttributeList>
+    <Tags>
+      <Tag Name="Motor_Start" DataType="Bool">
+        <Address>%M0.0</Address>
+        <Comment>启动命令</Comment>
+      </Tag>
+      <Tag Name="Motor_Stop" DataType="Bool">
+        <Address>%M0.1</Address>
+        <Comment>停止命令</Comment>
+      </Tag>
+      <Tag Name="Motor_Reset" DataType="Bool">
+        <Address>%M0.2</Address>
+        <Comment>复位命令</Comment>
+      </Tag>
+      <Tag Name="Motor_Run" DataType="Bool">
+        <Address>%M0.3</Address>
+        <Comment>运行反馈</Comment>
+      </Tag>
+      <Tag Name="Motor_Fault" DataType="Bool">
+        <Address>%M0.4</Address>
+        <Comment>故障信号</Comment>
+      </Tag>
+      <Tag Name="Motor_Speed" DataType="Real">
+        <Address>%MD10</Address>
+        <Comment>转速值</Comment>
+      </Tag>
+      <Tag Name="Motor_Mode" DataType="Int">
+        <Address>%MW20</Address>
+        <Comment>运行模式（0停止/1手动/2自动）</Comment>
+      </Tag>
+    </Tags>
+    <TextLists>
+      <TextList Name="Motor_Mode_List">
+        <Entry Value="0" Text="停止" />
+        <Entry Value="1" Text="手动" />
+        <Entry Value="2" Text="自动" />
+      </TextList>
+    </TextLists>
+    <ObjectList>
+      <ScreenItem ID="e892bfef-ecf7-4db2-b691-7f64e17df6f1" Name="TXT_Title" Type="TextField">
+      <Geometry>
+      <X>460</X>
+      <Y>30</Y>
+      <Width>360</Width>
+      <Height>44</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>fc0c908f-6bd8-46ae-9e1d-a5e96b9fd6dc</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">电机控制画面</Text>
+</MultilingualText>
+      </Text>
+      <FontSize>26</FontSize>
+      <Bold>true</Bold>
+      <ForeColor>230,237,243</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="137dfee2-d51a-4288-96df-6ce8ade1d8c4" Name="TXT_Label_Indicator" Type="TextField">
+      <Geometry>
+      <X>740</X>
+      <Y>130</Y>
+      <Width>60</Width>
+      <Height>30</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>2f0172ca-dcfb-4da5-b63a-e950dd8f7fef</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">指示灯</Text>
+</MultilingualText>
+      </Text>
+      <FontSize>14</FontSize>
+      <Bold>false</Bold>
+      <ForeColor>160,170,184</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="9590d0e9-e519-421b-8488-e482f6fe4717" Name="BTN_Start" Type="Button">
+      <Geometry>
+      <X>120</X>
+      <Y>140</Y>
+      <Width>130</Width>
+      <Height>56</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>2b871e47-20d5-4dbb-a8e4-1fa643ca055b</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">启动</Text>
+</MultilingualText>
+      </Text>
+      <BackColor>39,209,127</BackColor>
+      </Properties>
+      <Events>
+      <Event Name="Press">
+      <VBSFunction>Sub_Start</VBSFunction>
+      </Event>
+      </Events>
+      </ScreenItem>
+      <ScreenItem ID="7679bd29-17fb-42ae-bcc5-2331767c1fc4" Name="BTN_Stop" Type="Button">
+      <Geometry>
+      <X>280</X>
+      <Y>140</Y>
+      <Width>130</Width>
+      <Height>56</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>1e5a400e-04bf-47e7-af21-d3d30b8c2831</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">停止</Text>
+</MultilingualText>
+      </Text>
+      <BackColor>226,85,99</BackColor>
+      </Properties>
+      <Events>
+      <Event Name="Press">
+      <VBSFunction>Sub_Stop</VBSFunction>
+      </Event>
+      </Events>
+      </ScreenItem>
+      <ScreenItem ID="4127d29d-df52-43f0-9e85-ea48e1d50a0d" Name="BTN_Reset" Type="Button">
+      <Geometry>
+      <X>440</X>
+      <Y>140</Y>
+      <Width>130</Width>
+      <Height>56</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>a1236b28-a04f-4e78-bc63-8fa5680c404c</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">复位</Text>
+</MultilingualText>
+      </Text>
+      <BackColor>58,66,80</BackColor>
+      </Properties>
+      <Events>
+      <Event Name="Press">
+      <VBSFunction>Sub_Reset</VBSFunction>
+      </Event>
+      </Events>
+      </ScreenItem>
+      <ScreenItem ID="ef3e00e4-e5ae-410e-81f3-dda2fe90e1e0" Name="LMP_Run_lbl" Type="TextField">
+      <Geometry>
+      <X>690</X>
+      <Y>188</Y>
+      <Width>84</Width>
+      <Height>28</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>240b25e1-bf00-40aa-9af0-29741d5e6c45</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">运行</Text>
+</MultilingualText>
+      </Text>
+      <FontSize>14</FontSize>
+      <Bold>false</Bold>
+      <ForeColor>201,211,222</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="f6b531d1-594a-4426-b736-4b084c9aa412" Name="LMP_Run" Type="Circle">
+      <Geometry>
+      <X>780</X>
+      <Y>180</Y>
+      <Width>48</Width>
+      <Height>48</Height>
+      </Geometry>
+      <Properties>
+      <FillColor>58,66,80</FillColor>
+      <BorderColor>120,130,140</BorderColor>
+      </Properties>
+      <Animations>
+      <ColorAnimation Tag="Motor_Run">
+      <Range Value="0" FillColor="58,66,80" />
+      <Range Value="1" FillColor="39,209,127" />
+      </ColorAnimation>
+      </Animations>
+      </ScreenItem>
+      <ScreenItem ID="fb51f663-3b8f-4cdb-bec8-91ea388dd681" Name="LMP_Fault_lbl" Type="TextField">
+      <Geometry>
+      <X>830</X>
+      <Y>188</Y>
+      <Width>84</Width>
+      <Height>28</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>dcfff9aa-fb8d-4eeb-8b09-087d21fe174a</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">故障</Text>
+</MultilingualText>
+      </Text>
+      <FontSize>14</FontSize>
+      <Bold>false</Bold>
+      <ForeColor>201,211,222</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="cbbde644-4a39-4bfd-8754-9da97eb4364b" Name="LMP_Fault" Type="Circle">
+      <Geometry>
+      <X>920</X>
+      <Y>180</Y>
+      <Width>48</Width>
+      <Height>48</Height>
+      </Geometry>
+      <Properties>
+      <FillColor>58,66,80</FillColor>
+      <BorderColor>120,130,140</BorderColor>
+      </Properties>
+      <Animations>
+      <ColorAnimation Tag="Motor_Fault">
+      <Range Value="0" FillColor="58,66,80" />
+      <Range Value="1" FillColor="226,85,99" />
+      </ColorAnimation>
+      <FlashAnimation Tag="Motor_Fault">
+      <Range Value="1" Flashing="Yes" />
+      </FlashAnimation>
+      </Animations>
+      </ScreenItem>
+      <ScreenItem ID="d9af988f-5413-431a-b11e-9bf0f1e9db4b" Name="IO_Speed_lbl" Type="TextField">
+      <Geometry>
+      <X>190</X>
+      <Y>328</Y>
+      <Width>84</Width>
+      <Height>28</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>a22d7f9a-0325-47db-8b24-cebdc2aa9b9e</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">转速</Text>
+</MultilingualText>
+      </Text>
+      <FontSize>14</FontSize>
+      <Bold>false</Bold>
+      <ForeColor>201,211,222</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="e2c333d9-516a-493f-9b1b-405cd17c61d2" Name="IO_Speed" Type="IOField">
+      <Geometry>
+      <X>280</X>
+      <Y>320</Y>
+      <Width>160</Width>
+      <Height>44</Height>
+      </Geometry>
+      <Properties>
+      <Mode>Output</Mode>
+      <OutputFormat>Decimal</OutputFormat>
+      <DecimalDigits>0</DecimalDigits>
+      <FontSize>18</FontSize>
+      </Properties>
+      <Connection>
+      <ProcessTag>Motor_Speed</ProcessTag>
+      </Connection>
+      </ScreenItem>
+      <ScreenItem ID="4f024586-bfd0-4c8c-8562-bf7691f41af3" Name="IO_Speed_unit" Type="TextField">
+      <Geometry>
+      <X>446</X>
+      <Y>328</Y>
+      <Width>60</Width>
+      <Height>28</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>242b9b19-c0fd-4a3f-acd7-892f285b060c</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">rpm</Text>
+</MultilingualText>
+      </Text>
+      <FontSize>14</FontSize>
+      <Bold>false</Bold>
+      <ForeColor>154,167,180</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="51fbcd4b-7cf6-405e-a98c-6601dd6a9428" Name="SIO_Mode_lbl" Type="TextField">
+      <Geometry>
+      <X>190</X>
+      <Y>408</Y>
+      <Width>84</Width>
+      <Height>28</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>d19d7e49-ee06-4886-8e78-2cdb5922be6c</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">运行模式</Text>
+</MultilingualText>
+      </Text>
+      <FontSize>14</FontSize>
+      <Bold>false</Bold>
+      <ForeColor>201,211,222</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="2efd28ad-9d02-4bc9-b660-60be828b6fe8" Name="SIO_Mode" Type="SymbolicIOField">
+      <Geometry>
+      <X>280</X>
+      <Y>400</Y>
+      <Width>160</Width>
+      <Height>44</Height>
+      </Geometry>
+      <Properties>
+      <Mode>Output</Mode>
+      <FontSize>18</FontSize>
+      <TextList>Motor_Mode_List</TextList>
+      </Properties>
+      <Connection>
+      <ProcessTag>Motor_Mode</ProcessTag>
+      </Connection>
+      </ScreenItem>
+    </ObjectList>
+  </Screen>
+  <VBScripts>
+    
+      <Purpose>按下启动按钮：置位启动命令，复位停止命令</Purpose>
+      
+        '启动按钮按下事件
+SmartTags("Motor_Start") = 1
+SmartTags("Motor_Stop") = 0
+SmartTags("Motor_Reset") = 0
+      
+    
+    
+      <Purpose>按下停止按钮：置位停止命令，复位启动命令</Purpose>
+      
+        '停止按钮按下事件
+SmartTags("Motor_Stop") = 1
+SmartTags("Motor_Start") = 0
+SmartTags("Motor_Reset") = 0
+      
+    
+    
+      <Purpose>按下复位按钮：置位复位命令（通常为脉冲）</Purpose>
+      
+        '复位按钮按下事件
+SmartTags("Motor_Reset") = 1
+'复位命令通常由PLC处理为脉冲，此处只做瞬态置位
+      
+    
+  </VBScripts>
+</Document>
