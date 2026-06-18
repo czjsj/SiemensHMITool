@@ -35,6 +35,7 @@
         </div>
       </div>
       <button class="btn" id="btnConnect">连接</button>
+      <button class="btn" id="btnDisconnect" disabled>断开</button>
       <button class="btn" id="btnCalibrate" disabled title="连接后从博途导出参考画面用于格式校准">校准</button>
       <button class="btn warn" id="btnDiagnose">诊断</button>
     </div>
@@ -159,9 +160,9 @@
           <span style="margin-left:auto">缩放
             <select class="input" id="previewZoom" style="padding:4px 8px">
               <option value="0.4">40%</option>
-              <option value="0.5" selected>50%</option>
+              <option value="0.5">50%</option>
               <option value="0.65">65%</option>
-              <option value="0.8">80%</option>
+              <option value="0.8" selected>80%</option>
               <option value="1">100%</option>
             </select>
           </span>
@@ -221,6 +222,31 @@
               </div>
             </div>
 
+            <div class="config-section template-default-section">
+              <h3>HMI 默认模板设置（Basic / Comfort / Unified）</h3>
+              <div class="template-cards">
+                <div class="template-card">
+                  <div class="template-card-title">Basic 默认模板</div>
+                  <label class="check"><input type="checkbox" data-cfg-bool="openness.default_templates.basic.enabled"><span class="box"></span>启用</label>
+                  <label>模板画面名称</label><input class="input" data-cfg="openness.default_templates.basic.template_screen_name" placeholder="例如 Basic_Template">
+                  <label>模板 XML 路径</label><input class="input" data-cfg="openness.default_templates.basic.template_xml_path" placeholder="exports/templates/basic_template.xml">
+                </div>
+                <div class="template-card">
+                  <div class="template-card-title">Comfort 默认模板</div>
+                  <label class="check"><input type="checkbox" data-cfg-bool="openness.default_templates.comfort.enabled"><span class="box"></span>启用</label>
+                  <label>模板画面名称</label><input class="input" data-cfg="openness.default_templates.comfort.template_screen_name" placeholder="例如 Comfort_Template">
+                  <label>模板 XML 路径</label><input class="input" data-cfg="openness.default_templates.comfort.template_xml_path" placeholder="exports/templates/comfort_template.xml">
+                </div>
+                <div class="template-card">
+                  <div class="template-card-title">Unified 默认模板</div>
+                  <label class="check"><input type="checkbox" data-cfg-bool="openness.default_templates.unified.enabled"><span class="box"></span>启用</label>
+                  <label>模板画面名称</label><input class="input" data-cfg="openness.default_templates.unified.template_screen_name" placeholder="例如 Unified_Template">
+                  <label>模板 XML 路径</label><input class="input" data-cfg="openness.default_templates.unified.template_xml_path" placeholder="exports/templates/unified_template.xml">
+                </div>
+              </div>
+              <div class="config-hint">用于未手动导出模板时的默认模板路径。保存后后端可按 HMI 类型读取对应模板。</div>
+            </div>
+
             <div class="config-section">
               <h3>Unified 直接绘制设置</h3>
               <div class="config-grid">
@@ -246,10 +272,11 @@
                 <select class="input" data-cfg="hmi_defaults.resolution">
                   <option>1920x1080</option><option>1280x800</option>
                   <option>1024x768</option><option>800x480</option>
+                  <option>480x272</option><option>640x480</option><option>320x240</option>
                 </select>
                 <label>HMI 类型</label>
                 <select class="input" data-cfg="hmi_defaults.hmi_type">
-                  <option>Comfort</option><option>Unified</option>
+                  <option>Basic</option><option>Comfort</option><option>Unified</option>
                 </select>
                 <label>背景色</label><input class="input" data-cfg="hmi_defaults.background_color">
               </div>

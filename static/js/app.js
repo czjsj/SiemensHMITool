@@ -10,6 +10,7 @@ let UPLOADED = [];         // File[]
 let ABORT = null;          // 流式生成的 AbortController
 let REVIEW_ENABLED = false; // 视觉审查开关
 let PIPELINE_IR = null;     // 流水线最终 IR（供 build 使用）
+let LAST_CAPS = null;        // 最近一次读取到的 HMI 能力信息
 
 // ---------------- 工具 ----------------
 function toast(msg, isErr = false) {
@@ -38,6 +39,51 @@ function setPath(obj, path, val) {
   o[ks[ks.length - 1]] = val;
 }
 
+
+function ensureFrontendConfigDefaults() {
+  if (!CONFIG) return;
+  CONFIG.openness = CONFIG.openness || {};
+  CONFIG.hmi_defaults = CONFIG.hmi_defaults || {};
+  CONFIG.openness.default_templates = CONFIG.openness.default_templates || {};
+  ["basic", "comfort", "unified"].forEach((k) => {
+    CONFIG.openness.default_templates[k] = CONFIG.openness.default_templates[k] || {};
+    CONFIG.openness.default_templates[k].enabled = !!CONFIG.openness.default_templates[k].enabled;
+    CONFIG.openness.default_templates[k].template_screen_name = CONFIG.openness.default_templates[k].template_screen_name || "";
+    CONFIG.openness.default_templates[k].template_xml_path = CONFIG.openness.default_templates[k].template_xml_path || "";
+  });
+  CONFIG.hmi_defaults.hmi_type = CONFIG.hmi_defaults.hmi_type || "Comfort";
+  CONFIG.hmi_defaults.resolution = CONFIG.hmi_defaults.resolution || "800x480";
+}
+
+function normalizeHmiType(value) {
+  const s = String(value || "").toLowerCase();
+  if (s.includes("basic") || s.includes("ktp")) return "basic";
+  if (s.includes("unified")) return "unified";
+  if (s.includes("comfort") || s.includes("classic")) return "comfort";
+  return String((CONFIG && CONFIG.hmi_defaults && CONFIG.hmi_defaults.hmi_type) || "comfort").toLowerCase();
+}
+
+function applyDefaultTemplateForType(typeKey) {
+  ensureFrontendConfigDefaults();
+  const key = normalizeHmiType(typeKey);
+  const t = (((CONFIG.openness || {}).default_templates || {})[key]) || {};
+  if (!t.enabled) return;
+  CONFIG.openness.classic_template = CONFIG.openness.classic_template || {};
+  if (t.template_screen_name) CONFIG.openness.classic_template.template_screen_name = t.template_screen_name;
+  if (t.template_xml_path) CONFIG.openness.classic_template.template_xml_path = t.template_xml_path;
+}
+
+function setConnectionUi(connected, subText = "") {
+  $("#connDot").classList.toggle("online", !!connected);
+  $("#connTitle").textContent = connected ? "已连接" : "博途未连接";
+  $("#connSub").textContent = connected ? (subText || "已连接到项目") : "点击连接已打开项目的博途";
+  $("#btnConnect").disabled = !!connected;
+  $("#btnConnect").textContent = connected ? "已连接" : "连接";
+  const dis = $("#btnDisconnect");
+  if (dis) dis.disabled = !connected;
+  $("#btnCalibrate").disabled = !connected;
+}
+
 // ---------------- 初始化 ----------------
 async function init() {
   bindUI();
@@ -49,6 +95,7 @@ async function loadConfig() {
     const r = await fetch("/api/config");
     const j = await r.json();
     CONFIG = j.config;
+    ensureFrontendConfigDefaults();
     $("#rawYaml").value = j.raw;
     populateModelSelect();
     fillConfigForm();
@@ -66,6 +113,8 @@ async function loadConfig() {
     // 初始化生成模式选择
     const genMode = CONFIG.openness.generation_mode || "auto";
     $("#impMode").value = genMode;
+    // 画面预览默认 80%
+    if ($("#previewZoom")) $("#previewZoom").value = "0.8";
   } catch (e) { toast("加载配置失败：" + e, true); }
 }
 
@@ -208,6 +257,7 @@ function bindUI() {
 
   // Openness
   $("#btnConnect").addEventListener("click", connectOpenness);
+  $("#btnDisconnect").addEventListener("click", disconnectOpenness);
   $("#btnCalibrate").addEventListener("click", calibrateReference);
   $("#btnImport").addEventListener("click", importToTia);
 
@@ -676,8 +726,10 @@ function switchCfgMode(mode) {
 }
 async function saveConfigForm() {
   // 把表单值写回 CONFIG
+  ensureFrontendConfigDefaults();
   $$("[data-cfg]").forEach((el) => setPath(CONFIG, el.dataset.cfg, el.value));
   $$("[data-cfg-bool]").forEach((el) => setPath(CONFIG, el.dataset.cfgBool, el.checked));
+  applyDefaultTemplateForType(CONFIG.hmi_defaults && CONFIG.hmi_defaults.hmi_type);
   try {
     const r = await fetch("/api/config", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -765,12 +817,8 @@ async function connectOpenness() {
     const r = await fetch("/api/openness/connect", { method: "POST" });
     const j = await r.json();
     if (j.connected) {
-      $("#connDot").classList.add("online");
-      $("#connTitle").textContent = "已连接";
-      $("#connSub").textContent = j.project_name ? ("项目：" + j.project_name) : "";
+      setConnectionUi(true, j.project_name ? ("项目：" + j.project_name) : "");
       log(j.message || "已连接", "ok"); toast("已连接到博途");
-      $("#btnConnect").textContent = "已连接";
-      $("#btnCalibrate").disabled = false;
       // 自动提醒校准
       if (!CONFIG.output || !CONFIG.output.reference_xml) {
         log("⚠ 建议点击「校准」按钮，从博途导出一个参考画面以匹配 SimaticML 格式", "warn");
@@ -781,18 +829,43 @@ async function connectOpenness() {
     } else {
       const errMsg = j.message || j.error || "未知错误";
       log("连接失败：" + errMsg, "err"); toast("连接失败：" + errMsg, true);
-      $("#btnConnect").textContent = "连接"; $("#btnConnect").disabled = false;
+      setConnectionUi(false);
       if (j.diagnose) showDiag(j.diagnose);
     }
   } catch (e) {
-    toast("连接异常：" + e, true); $("#btnConnect").textContent = "连接"; $("#btnConnect").disabled = false;
+    toast("连接异常：" + e, true); setConnectionUi(false);
   }
+}
+
+async function disconnectOpenness() {
+  const btn = $("#btnDisconnect");
+  if (btn) { btn.disabled = true; btn.textContent = "断开中…"; }
+  try {
+    const r = await fetch("/api/openness/disconnect", { method: "POST" });
+    if (r.ok) {
+      const j = await r.json().catch(() => ({}));
+      log(j.message || "已手动断开博途连接", "ok");
+    } else {
+      log("后端暂未提供断开接口，已在前端重置连接状态", "warn");
+    }
+  } catch (e) {
+    log("断开接口不可用，已在前端重置连接状态：" + e, "warn");
+  }
+  setConnectionUi(false);
+  LAST_CAPS = null;
+  const cap = $("#hmiCapBar");
+  if (cap) cap.style.display = "none";
+  if (btn) btn.textContent = "断开";
+  toast("已断开连接");
 }
 
 async function fetchCapabilities() {
   try {
     const r = await fetch("/api/openness/capabilities");
     const caps = await r.json();
+    LAST_CAPS = caps;
+    const typeKey = normalizeHmiType(caps.hmi_family || caps.hmi_software_type || caps.hmi_type);
+    applyDefaultTemplateForType(typeKey);
     showHmiCapabilities(caps);
   } catch (e) { /* 静默失败 */ }
 }
@@ -802,7 +875,8 @@ function showHmiCapabilities(caps) {
   if (!bar) return;
   bar.style.display = "flex";
   $("#hmiCapDevice").textContent = caps.hmi_device || "-";
-  $("#hmiCapType").textContent = caps.hmi_software_type || "Unknown";
+  const typeText = caps.hmi_family || caps.hmi_software_type || caps.hmi_type || "Unknown";
+  $("#hmiCapType").textContent = typeText;
   // 显示推荐模式
   const modeLabels = { unified_direct: "Unified 直接绘制", classic_template_xml: "经典模板 XML", simaticml: "SimaticML 导入" };
   $("#hmiCapMode").textContent = modeLabels[caps.recommended_mode] || caps.recommended_mode || "-";
@@ -859,17 +933,24 @@ async function importToTia() {
   if (!LAST_BUILD && !PIPELINE_IR) { toast("请先生成画面", true); return; }
 
   const mode = $("#impMode").value || "auto";
+  const typeHint = (PIPELINE_IR && PIPELINE_IR.meta && PIPELINE_IR.meta.hmi_type)
+    || (LAST_BUILD && LAST_BUILD.ir && LAST_BUILD.ir.meta && LAST_BUILD.ir.meta.hmi_type)
+    || (LAST_CAPS && (LAST_CAPS.hmi_family || LAST_CAPS.hmi_software_type || LAST_CAPS.hmi_type))
+    || (CONFIG.hmi_defaults && CONFIG.hmi_defaults.hmi_type);
+  applyDefaultTemplateForType(typeHint);
   $("#btnImport").disabled = true; $("#btnImport").textContent = "导入中…";
   log(`开始导入到博途（模式: ${mode}）…`);
   try {
     // 新双路线模式：传 IR + mode（优先）
     let body;
+    const tmplKey = normalizeHmiType(typeHint);
+    const defaultTemplate = (((CONFIG.openness || {}).default_templates || {})[tmplKey]) || {};
     if (PIPELINE_IR) {
-      body = { ir: PIPELINE_IR, mode: mode };
+      body = { ir: PIPELINE_IR, mode: mode, default_template: defaultTemplate };
     } else if (LAST_BUILD && LAST_BUILD.ir) {
-      body = { ir: LAST_BUILD.ir, mode: mode };
+      body = { ir: LAST_BUILD.ir, mode: mode, default_template: defaultTemplate };
     } else {
-      body = { xml_path: (LAST_BUILD || {}).xml_path };
+      body = { xml_path: (LAST_BUILD || {}).xml_path, default_template: defaultTemplate };
     }
     const r = await fetch("/api/openness/import", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -921,13 +1002,18 @@ async function exportTemplate() {
   try {
     const r = await fetch("/api/openness/export-template", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ screen_name: screenName, export_dir: exportDir || undefined, overwrite: true }),
+      body: JSON.stringify({ screen_name: screenName, export_dir: exportDir || undefined, overwrite: true, hmi_type: CONFIG.hmi_defaults && CONFIG.hmi_defaults.hmi_type }),
     });
     const j = await r.json();
     if (j.ok) {
       log(`模板 XML 已导出: ${j.xml_path}`, "ok");
       log(`导出方法: ${(j.details && j.details.export_method) || "未知"}`, "ok");
       toast(`模板 "${j.screen_name}" 导出成功！`);
+      const key = normalizeHmiType(CONFIG.hmi_defaults && CONFIG.hmi_defaults.hmi_type);
+      ensureFrontendConfigDefaults();
+      CONFIG.openness.default_templates[key].enabled = true;
+      CONFIG.openness.default_templates[key].template_screen_name = j.screen_name || screenName;
+      CONFIG.openness.default_templates[key].template_xml_path = j.xml_path || CONFIG.openness.default_templates[key].template_xml_path;
       (j.warnings || []).forEach((w) => log("⚠ " + w, "warn"));
       $("#exportTemplateModal").classList.remove("show");
       await loadConfig();

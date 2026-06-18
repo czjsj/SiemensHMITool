@@ -32,9 +32,19 @@
 }
 /* 浅色主题（顶部切换） */
 body.light {
-  --bg-base:#eef1f5; --bg-grad-top:#f5f7fa; --bg-panel:#ffffff; --bg-elevated:#f7f9fb;
-  --bg-input:#ffffff; --bg-hover:#eef1f5; --border:#dce1e8; --border-light:#c9d1da;
-  --text:#1a2230; --text-sec:#52606d; --text-muted:#8895a3; --shadow:0 6px 22px rgba(20,30,50,0.08);
+  --bg-base:#f6ecd8;
+  --bg-grad-top:#fff8e8;
+  --bg-panel:#fffaf0;
+  --bg-elevated:#fff4df;
+  --bg-input:#fffdf7;
+  --bg-hover:#f3e2bd;
+  --border:#e2cfaa;
+  --border-light:#ceb78d;
+  --accent-dim:rgba(17,199,159,0.14);
+  --text:#2a2418;
+  --text-sec:#675942;
+  --text-muted:#927f60;
+  --shadow:0 6px 22px rgba(120,90,40,0.12);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -476,4 +486,109 @@ select.input:focus, input.input:focus, textarea.input:focus {
 /* ===== 生成模式选择 ===== */
 .import-bar select.input {
   min-width: 130px; padding: 5px 8px;
+}
+
+
+/* ===== 前端可用性优化补丁：滚动条、浅色主题、模板卡片、按钮悬停 ===== */
+body.light .topbar,
+body.light .import-bar,
+body.light .hmi-cap-bar {
+  background: rgba(255, 250, 240, 0.82);
+}
+body.light .modal-mask { background: rgba(120, 90, 40, 0.22); }
+body.light .preview-wrap,
+body.light .config-wrap,
+body.light .tab-page,
+body.light .left-body { background: transparent; }
+body.light .preview-canvas { border-color: #c7a86b; }
+body.light .log-box { background: rgba(255, 250, 240, 0.45); }
+
+/* AI 输出区域强制显示可滚动内容，避免长 JSON 无法下滑查看 */
+.tab-page[data-page="output"] { overflow: hidden; }
+.output-wrap { min-height: 180px; }
+.output-body {
+  overflow-y: scroll;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-light) transparent;
+}
+.thinking-body {
+  overflow-y: scroll;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-light) transparent;
+}
+
+/* 视觉审查区域增加侧边栏并拉开间距 */
+.pipeline-progress {
+  max-height: 42vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-light) transparent;
+}
+.review-result {
+  max-height: 34vh;
+  overflow-y: auto;
+  padding-right: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-light) transparent;
+}
+.review-categories { gap: 10px; }
+.review-category { padding: 9px 12px; line-height: 1.35; }
+.review-issues { margin: 4px 0 10px; padding-left: 24px; }
+.review-issues li { padding: 4px 0; line-height: 1.45; }
+.review-critical, .review-suggestions { margin-top: 10px; line-height: 1.55; }
+.review-critical li, .review-suggestions li { padding: 4px 0; }
+.review-banner { align-items: flex-start; line-height: 1.45; }
+.review-summary { min-width: 0; white-space: normal; }
+
+/* 生成画面按钮悬停：保持亮色渐变和深色文字，避免文字被覆盖 */
+.btn-primary,
+.gen-btn {
+  position: relative;
+  overflow: hidden;
+}
+.btn-primary:hover,
+.gen-btn:hover {
+  background: linear-gradient(135deg, var(--accent-hover), var(--accent));
+  color: #04261e;
+  border-color: transparent;
+  filter: none;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px var(--accent-glow);
+}
+.btn-primary:hover svg,
+.gen-btn:hover svg { color: #04261e; stroke: #04261e; }
+
+/* 三类 HMI 默认模板配置卡片 */
+.template-default-section .template-cards {
+  padding: 14px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.template-card {
+  border: 1px solid var(--border-light);
+  background: var(--bg-input);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+.template-card-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 2px;
+}
+.template-card label:not(.check) {
+  font-size: 12px;
+  color: var(--text-sec);
+}
+.config-hint {
+  padding: 0 14px 14px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+@media (max-width: 1200px) {
+  .template-default-section .template-cards { grid-template-columns: 1fr; }
 }
