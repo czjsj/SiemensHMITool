@@ -11,7 +11,11 @@ VALID_OBJECT_TYPES = {
 VALID_MODES = {"Input", "Output", "InputOutput"}
 VALID_FORMATS = {"Decimal", "String", "Hex", "Binary"}
 VALID_DATATYPES = {"Bool", "Int", "DInt", "Real", "Word", "String"}
-VALID_RES = {"1920x1080", "1280x800", "1024x768", "800x480"}
+VALID_RES = {
+    "1920x1080", "1366x768", "1280x800", "1024x768",
+    "800x480", "640x480", "480x272", "320x240",
+}
+VALID_HMI_TYPES = {"Basic", "Comfort", "Unified"}
 
 
 class IRValidationError(Exception):
@@ -22,6 +26,19 @@ def _req(d, key, where):
     if key not in d or d[key] in (None, ""):
         raise IRValidationError(f"{where} 缺少必填字段 '{key}'")
     return d[key]
+
+
+def _normalize_hmi_type(value: str) -> str:
+    """把用户/模型输入的 HMI 类型归一化为 Basic / Comfort / Unified。"""
+    raw = str(value or "Comfort").strip()
+    low = raw.lower()
+    if "unified" in low:
+        return "Unified"
+    if "basic" in low or "ktp" in low:
+        return "Basic"
+    if "comfort" in low:
+        return "Comfort"
+    return raw if raw in VALID_HMI_TYPES else "Comfort"
 
 
 def _unique_id(base_id: str, seen_ids: set) -> str:
@@ -151,11 +168,20 @@ def validate_ir(ir: dict) -> dict:
     meta.setdefault("screen_name", "Screen_1")
     meta.setdefault("title", meta["screen_name"])
     meta.setdefault("description", "")
-    res = meta.get("resolution", "1280x800")
+    warnings = []
+
+    res = str(meta.get("resolution", "1280x800") or "1280x800").strip()
     if res not in VALID_RES:
-        res = "1280x800"
+        parsed = parse_resolution(res)
+        if parsed:
+            res = f"{parsed[0]}x{parsed[1]}"
+            warnings.append(f"使用自定义 HMI 分辨率 {res}，请确认与目标面板一致。")
+        else:
+            warnings.append(f"非法分辨率 '{res}'，已回退到 1280x800。")
+            res = "1280x800"
     meta["resolution"] = res
-    meta.setdefault("hmi_type", "Comfort")
+
+    meta["hmi_type"] = _normalize_hmi_type(meta.get("hmi_type", "Comfort"))
 
     # 双路线生成可选字段（默认值）
     VALID_GEN_MODES = {"auto", "unified_direct", "classic_template_xml", "simaticml"}
@@ -221,13 +247,17 @@ def validate_ir(ir: dict) -> dict:
         })
         script_names.add(name)
     ir["scripts"] = norm_scripts
+    if meta.get("hmi_type") == "Basic" and norm_scripts:
+        warnings.append(
+            "当前 IR 目标为 Basic 面板：Basic/KTP Basic 对脚本和高级控件支持有限；"
+            "推荐通过 Basic 面板导出的模板 XML 预置按钮事件或改为 PLC 变量触发。"
+        )
 
     # ---- objects ----
     objects = ir.get("objects") or []
     if not objects:
         raise IRValidationError("objects 为空，画面没有任何对象")
 
-    warnings = []
     norm_objs = []
     seen_ids = set()
     for i, o in enumerate(objects):
@@ -282,6 +312,10 @@ def validate_ir(ir: dict) -> dict:
                     warnings.append(f"{where}({oid}) 事件 {ev} 引用脚本 '{sc}' 未定义")
                 base[ev] = sc or None
             base["background_color"] = o.get("background_color", "#2BB673")
+            if meta.get("hmi_type") == "Basic" and any(base.get(ev) for ev in ("press_script", "release_script", "click_script")):
+                warnings.append(
+                    f"{where}({oid}) 绑定了脚本事件；Basic 面板建议使用模板中预置的按钮事件或 PLC 变量触发。"
+                )
 
         elif otype == "Indicator":
             base["radius"] = int(o.get("radius", 22))

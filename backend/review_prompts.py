@@ -29,7 +29,7 @@ SIEMENS_COLOR_REFERENCE = """
 # ---------------------------------------------------------------------------
 HMI_REVIEW_TASK = f"""
 你是西门子 WinCC / 博途(TIA Portal) HMI 画面设计审查专家。
-请仔细审查这张 HMI 画面预览图，按照以下 Siemens Comfort 面板工程标准逐项评估。
+请仔细审查这张 HMI 画面预览图，按照以下 Siemens Basic/Comfort/Unified HMI 画面工程标准逐项评估。
 只描述图中可见内容，不要凭空推测。
 
 {SIEMENS_COLOR_REFERENCE}

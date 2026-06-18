@@ -24,8 +24,8 @@ IR_SCHEMA_DOC = r"""
     "screen_name": "字符串，画面名称，英文+下划线，例如 Motor_Control",
     "title": "字符串，画面中文标题，用于顶部静态文本",
     "description": "字符串，对画面的中文简述",
-    "resolution": "枚举：1920x1080 | 1280x800 | 1024x768 | 800x480",
-    "hmi_type": "枚举：Comfort | Unified（默认 Comfort）",
+    "resolution": "枚举或合法 WxH：1920x1080 | 1366x768 | 1280x800 | 1024x768 | 800x480 | 640x480 | 480x272 | 320x240",
+    "hmi_type": "枚举：Basic | Comfort | Unified（默认 Comfort；KTP/Basic 触摸屏填 Basic）",
     "generation_mode": "可选，枚举：auto | unified_direct | classic_template_xml | simaticml，默认 auto",
     "template_screen": "可选，经典模板 XML 模式使用的模板画面名",
     "template_xml": "可选，经典模板 XML 模式使用的模板 XML 路径"
@@ -170,6 +170,12 @@ SYSTEM_PROMPT = f"""你是一名资深的西门子 WinCC / 博途(TIA Portal) HM
   符号 IO 域引用的文本列表必须在 text_lists 中声明；
   按钮事件引用的脚本必须在 scripts 中给出完整 VBS 代码。
 - 坐标基于所选分辨率（左上角为原点，单位像素），不得越界。
+
+【Basic 面板兼容要求】
+- 如果用户说明目标是 Basic / KTP Basic / 精简面板，meta.hmi_type 必须填写 "Basic"。
+- Basic 面板优先使用 480x272、800x480、1280x800 等实际面板分辨率；不确定时用用户配置或需求中的分辨率。
+- Basic 面板导入优先走“模板 XML 改写”：对象类型保持简单，只使用 Text、IOField、SymbolicIOField、Button、Indicator。
+- Basic 面板对 VBS 脚本和复杂动画支持有限；Basic 场景中按钮 press_script/release_script/click_script 尽量置为 null，scripts 可为空，按钮动作建议交由模板画面预置事件或 PLC 变量实现。
 
 {TEXT_CONVENTIONS}
 

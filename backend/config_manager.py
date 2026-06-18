@@ -39,7 +39,7 @@ DEFAULT_CONFIG = {
         "project_path": "",                    # 留空则使用当前已打开项目
         "hmi_device": "HMI_1",                 # 目标 HMI 设备名
         "screen_folder": "",                   # 留空导入到根画面文件夹
-        "target_resolution": "",               # 可选：目标 HMI 分辨率，如 800x480；留空则自动从已有画面读取
+        "target_resolution": "",               # 可选：目标 HMI 分辨率，如 Basic 常用 480x272 / 800x480；留空则自动从已有画面读取
         "auto_scale_screen_items": True,        # 尺寸自动对齐时同步缩放控件坐标/大小
         "compile_after_import": True,
         "save_after_import": False,
@@ -67,7 +67,7 @@ DEFAULT_CONFIG = {
     },
     "hmi_defaults": {
         "resolution": "1280x800",
-        "hmi_type": "Comfort",
+        "hmi_type": "Comfort",                    # Basic | Comfort | Unified
         "background_color": "#1F2630",
         "font_family": "Arial",
     },

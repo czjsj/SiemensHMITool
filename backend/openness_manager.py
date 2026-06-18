@@ -644,19 +644,34 @@ class OpennessManager:
     # ---------------- 查找 HMI 软件 ----------------
     def _find_hmi_software(self):
         """遍历设备，找到目标 HMI 设备的 HmiTarget/Software。
-        兼容 Comfort 面板（Siemens.Engineering.Hmi）和 Unified 面板
+        兼容 Basic/Comfort 等经典面板（Siemens.Engineering.Hmi）和 Unified 面板
         （Siemens.Engineering.HmiUnified），自动探测当前 TIA 版本可用的程序集。
         """
-        # 按实际安装情况尝试加载 HMI 程序集（Comfort / Unified 二选一）
-        try:
-            import Siemens.Engineering.HmiUnified  # noqa: F401
-        except Exception:
+        # 按实际安装情况尝试加载 HMI 程序集（Basic/Comfort 归属 Hmi，Unified 归属 HmiUnified）
+        for asm in ("Siemens.Engineering.HmiUnified", "Siemens.Engineering.Hmi"):
             try:
-                import Siemens.Engineering.Hmi  # noqa: F401
+                __import__(asm)  # noqa: F401
             except Exception:
-                pass  # 两个都没有也不在这里报错，后面遍历设备时自然会跳过
+                pass
 
-        target_name = self.cfg.get("hmi_device", "")
+        target_name = str(self.cfg.get("hmi_device", "") or "").strip()
+        self._last_hmi_device = None
+        self._last_hmi_item = None
+
+        def _target_match(device, item, sw) -> bool:
+            if not target_name:
+                return True
+            candidates = []
+            for obj in (device, item, sw):
+                for attr in ("Name", "DeviceName", "TypeIdentifier", "OrderNumber"):
+                    try:
+                        v = getattr(obj, attr)
+                        if v:
+                            candidates.append(str(v))
+                    except Exception:
+                        pass
+            return any(c == target_name for c in candidates)
+
         for device in self._project.Devices:
             for item in device.DeviceItems:
                 try:
@@ -665,13 +680,57 @@ class OpennessManager:
                                    fromlist=["SoftwareContainer"]).SoftwareContainer]()
                     if sw_container and sw_container.Software:
                         sw = sw_container.Software
-                        # HMI 软件类型名包含 HmiTarget
-                        if "Hmi" in type(sw).__name__:
-                            if (not target_name) or (str(device.Name) == target_name):
-                                return sw
+                        sw_type = f"{type(sw).__module__}.{type(sw).__name__}"
+                        # Basic/Comfort/Unified 的软件对象类型名/模块名均会包含 Hmi。
+                        if "Hmi" in sw_type and _target_match(device, item, sw):
+                            self._last_hmi_device = device
+                            self._last_hmi_item = item
+                            return sw
                 except Exception:
                     continue
         return None
+
+    def _safe_str_attr(self, obj, attr: str) -> str:
+        try:
+            value = getattr(obj, attr)
+            return str(value) if value is not None else ""
+        except Exception:
+            return ""
+
+    def _detect_classic_hmi_family(self, sw, device=None, item=None) -> str:
+        """把经典 HMI 进一步区分为 Basic / Comfort / Classic。
+
+        Openness 中 Basic 和 Comfort 通常同属 Siemens.Engineering.Hmi，
+        仅靠 sw 的 Python/.NET 类型名往往只能识别为 HmiTarget。这里综合：
+        1) 用户配置 hmi_defaults.hmi_type / openness.hmi_type；
+        2) 设备名、DeviceItem 名、TypeIdentifier/OrderNumber 等字符串。
+        """
+        cfg_type = (
+            (self.hmi_defaults or {}).get("hmi_type")
+            or self.cfg.get("hmi_type")
+            or ""
+        )
+        cfg_low = str(cfg_type).lower()
+        if "basic" in cfg_low or "ktp" in cfg_low:
+            return "Basic"
+        if "comfort" in cfg_low:
+            return "Comfort"
+
+        parts = []
+        for obj in (device, item, sw):
+            if obj is None:
+                continue
+            parts.append(type(obj).__name__)
+            parts.append(getattr(type(obj), "FullName", "") or "")
+            for attr in ("Name", "DeviceName", "TypeIdentifier", "OrderNumber", "ProductName"):
+                parts.append(self._safe_str_attr(obj, attr))
+        joined = " ".join(p for p in parts if p).lower()
+
+        if "basic" in joined or "ktp" in joined:
+            return "Basic"
+        if "comfort" in joined:
+            return "Comfort"
+        return "Classic"
 
     # ---------------- 导出参考画面（校准用） -----------------
     def export_reference_screen(self, screen_name: str = "") -> dict:
@@ -861,6 +920,9 @@ class OpennessManager:
             "hmi_software_type": "Unknown",
             "is_unified": False,
             "is_classic": False,
+            "is_basic": False,
+            "is_comfort": False,
+            "hmi_family": "Unknown",
             "supports_direct_screen_items": False,
             "supports_screen_xml_export_import": False,
             "available_screens": [],
@@ -885,29 +947,53 @@ class OpennessManager:
             sw_full_name = type(sw).FullName if hasattr(type(sw), "FullName") else sw_type_name
             sw_module = type(sw).__module__ or ""
 
-            # 识别 HMI 类型
+            # 识别 HMI 类型。Basic/Comfort 同属经典 HMI，需要额外区分。
             is_unified = ("HmiUnified" in sw_full_name or
                           "HmiUnified" in sw_module or
                           "Unified" in sw_type_name)
             is_classic = not is_unified and ("Hmi" in sw_type_name or
-                                             "Hmi" in sw_full_name)
+                                             "Hmi" in sw_full_name or
+                                             "Hmi" in sw_module)
+            classic_family = "Unknown"
+            if is_classic:
+                classic_family = self._detect_classic_hmi_family(
+                    sw,
+                    getattr(self, "_last_hmi_device", None),
+                    getattr(self, "_last_hmi_item", None),
+                )
 
-            base["hmi_software_type"] = "Unified" if is_unified else ("Classic" if is_classic else "Unknown")
+            is_basic = is_classic and classic_family == "Basic"
+            is_comfort = is_classic and classic_family == "Comfort"
+
+            base["hmi_family"] = "Unified" if is_unified else classic_family
+            base["hmi_software_type"] = "Unified" if is_unified else (classic_family if is_classic else "Unknown")
             base["is_unified"] = is_unified
             base["is_classic"] = is_classic
-            base["supports_screen_xml_export_import"] = True  # 两种类型都支持 XML 导入导出
+            base["is_basic"] = is_basic
+            base["is_comfort"] = is_comfort
+            base["supports_screen_xml_export_import"] = bool(is_unified or is_classic)
 
             if is_unified:
                 base["supports_direct_screen_items"] = True
                 base["recommended_mode"] = "unified_direct"
             elif is_classic:
                 base["supports_direct_screen_items"] = False
-                # 如果配置了模板，推荐模板 XML 模式
+                base["recommended_mode"] = "classic_template_xml"
+
                 tmpl_cfg = self.cfg.get("classic_template", {})
-                if tmpl_cfg.get("enabled") and tmpl_cfg.get("template_xml_path"):
-                    base["recommended_mode"] = "classic_template_xml"
-                else:
-                    base["recommended_mode"] = "classic_template_xml"
+                has_template = bool(tmpl_cfg.get("enabled") and tmpl_cfg.get("template_xml_path"))
+
+                if is_basic:
+                    base["warnings"].append(
+                        "已按 Basic/KTP Basic 经典面板处理：不使用 Unified 直接绘制，"
+                        "建议只使用 Basic 面板自身导出的模板 XML 进行改写后导入。"
+                    )
+                    if not has_template:
+                        base["warnings"].append(
+                            "Basic 面板尚未配置模板 XML。请先在同一 Basic 触摸屏设备下手工创建模板画面，"
+                            "导出 XML 后填入 classic_template.template_xml_path。"
+                        )
+                elif not has_template:
                     base["warnings"].append(
                         "经典 HMI 推荐使用模板 XML 模式，但尚未配置模板。"
                         "请先在博途中手工创建模板画面并导出模板 XML。"
@@ -1386,6 +1472,7 @@ class OpennessManager:
                     "screen_name": screen_name, "warnings": [], "details": {}}
 
         caps = self.get_hmi_capabilities()
+        is_basic = bool(caps.get("is_basic"))
 
         # 自动判断模式
         if mode == "auto":
@@ -1402,11 +1489,12 @@ class OpennessManager:
         # ---- Unified 直接绘制 ----
         if mode == "unified_direct":
             if not caps["is_unified"]:
+                fallback = "classic_template_xml" if caps.get("is_classic") else "simaticml"
                 warnings.append(
                     f"当前 HMI 类型为 {caps['hmi_software_type']}，"
-                    f"不支持 Unified 直接绘制，已回退到 simaticml。"
+                    f"不支持 Unified 直接绘制，已回退到 {fallback}。"
                 )
-                mode = "simaticml"
+                mode = fallback
             else:
                 result = self.create_unified_screen_from_ir(ir)
                 result["mode"] = mode
@@ -1427,10 +1515,25 @@ class OpennessManager:
                 template_xml_path = ir.get("meta", {}).get("template_xml") or tmpl_cfg.get("template_xml_path", "")
 
                 if not template_xml_path or not os.path.exists(template_xml_path):
-                    warnings.append(
-                        f"模板 XML 路径无效或不存在：{template_xml_path}，"
-                        f"已回退到 simaticml。请先在博途中导出模板画面 XML。"
+                    msg = (
+                        f"模板 XML 路径无效或不存在：{template_xml_path}。"
+                        f"请先在博途中基于目标 HMI 设备导出模板画面 XML。"
                     )
+                    if is_basic:
+                        warnings.append(msg)
+                        return {
+                            "ok": False,
+                            "mode": "classic_template_xml",
+                            "hmi_type": caps["hmi_software_type"],
+                            "screen_name": screen_name,
+                            "message": (
+                                "Basic/KTP Basic 面板已启用，但 Basic 画面导入必须使用同型号 Basic 面板导出的模板 XML。"
+                                "请配置 openness.classic_template.template_xml_path 后重试。"
+                            ),
+                            "warnings": warnings,
+                            "details": details,
+                        }
+                    warnings.append(msg + "已回退到 simaticml。")
                     mode = "simaticml"
                 else:
                     try:
@@ -1476,11 +1579,27 @@ class OpennessManager:
                             "details": details,
                         }
                     except Exception as e:
+                        if is_basic:
+                            warnings.append(f"Basic 模板 XML 生成失败：{e}")
+                            return {
+                                "ok": False,
+                                "mode": "classic_template_xml",
+                                "hmi_type": caps["hmi_software_type"],
+                                "screen_name": screen_name,
+                                "message": "Basic/KTP Basic 面板模板 XML 生成失败，未回退到 SimaticML，以避免生成与 Basic 设备不兼容的 XML。",
+                                "warnings": warnings,
+                                "details": details,
+                            }
                         warnings.append(f"模板 XML 生成失败：{e}，已回退到 simaticml。")
                         mode = "simaticml"
 
         # ---- SimaticML 旧流程（兼容保留） ----
         if mode == "simaticml":
+            if is_basic:
+                warnings.append(
+                    "当前目标为 Basic/KTP Basic。SimaticML 从零生成不一定兼容 Basic 设备，"
+                    "建议改用 classic_template_xml 并使用同型号 Basic 面板导出的模板 XML。"
+                )
             from .simaticml_generator import generate_simaticml
 
             cfg = self.cfg

@@ -7,7 +7,7 @@ ScreenFolder.Import() 导入到博途。
 
 ⚠️ 重要版本说明（务必阅读）：
   SimaticML 的精确元素名/命名空间在不同 TIA 版本(V16/V17/V18/V19)和不同
-  HMI 类型(Comfort/Unified)之间存在差异。最稳妥的工程做法是：
+  HMI 类型(Basic/Comfort/Unified)之间存在差异。最稳妥的工程做法是：
      1) 在你的博途里手工画一个含目标对象(IO域/符号IO域/按钮/圆)的样例画面；
      2) 用 Screen.Export() 导出该画面 XML，观察真实结构；
      3) 用本文件生成的 XML 作为骨架，按导出样例对齐元素名/属性名。
@@ -398,7 +398,7 @@ def generate_simaticml(ir: dict, tia_version: str = "V18",
         tia_version: TIA 版本号（如 V18）。
         reference_xml: 从博途导出的参考画面 XML。提供时，生成器会匹配其
                       命名空间和结构，确保与当前 TIA 版本兼容。
-                      未提供时使用 Comfort 面板的默认格式。
+                      未提供时使用经典 HMI 的默认格式；Basic 面板建议提供同型号导出的模板 XML。
     """
     tmpl = _extract_template_info(reference_xml) if reference_xml else {}
     return _generate(ir, tia_version, tmpl)
@@ -406,6 +406,8 @@ def generate_simaticml(ir: dict, tia_version: str = "V18",
 
 def _generate(ir: dict, tia_version: str, tmpl: dict) -> str:
     meta = ir["meta"]
+    hmi_type = str(meta.get("hmi_type", "Comfort"))
+    basic_mode = hmi_type.lower() == "basic"
     screen_name = TextNormalizer.normalize(meta.get("screen_name", "Screen_1"))
     screen_title = TextNormalizer.normalize(meta.get("title", screen_name))
     w, h = ir["_screen_size"]["width"], ir["_screen_size"]["height"]
@@ -484,7 +486,11 @@ def _generate(ir: dict, tia_version: str, tmpl: dict) -> str:
     # 注意：label/unit 已在 hmi_ir.validate_ir() 中展开为显式 Text 对象。
     # 这里不再隐式生成 _lbl/_unit，否则导入到 TIA 后对象数会再次膨胀并产生重复文字。
     lines.append(f"{indent}<{items_container}>")
-    for o in ir.get("objects", []) or []:
+    objects = ir.get("objects", []) or []
+    if basic_mode:
+        # Basic/KTP Basic 面板对 VBS/高级事件支持有限；从零生成 SimaticML 时不输出按钮脚本事件。
+        objects = [dict(o, press_script=None, release_script=None, click_script=None) if o.get("type") == "Button" else o for o in objects]
+    for o in objects:
         otype = o.get("type", "")
         builder = _DISPATCH.get(otype)
         if builder:
@@ -501,7 +507,7 @@ def _generate(ir: dict, tia_version: str, tmpl: dict) -> str:
                 lines.append(close_line)
 
     # VBScripts
-    scripts = ir.get("scripts") or []
+    scripts = [] if basic_mode else (ir.get("scripts") or [])
     if scripts:
         lines.append("  <VBScripts>")
         for s in scripts:
