@@ -603,6 +603,10 @@ async function autoBuildPreview() {
       log("预览已就绪，可切换到「画面预览」查看", "ok");
     }
   } catch (e) { /* 静默失败，用户可手动点击生成 XML */ }
+  // V4 集成：同步 IR 到 V4 工作台
+  if (PIPELINE_IR && window.V4_onGenerationResult) {
+    try { window.V4_onGenerationResult(PIPELINE_IR); } catch(e) { /* silent */ }
+  }
 }
 
 async function buildXml() {
@@ -634,6 +638,10 @@ async function buildXml() {
     $(`.tab[data-tab="preview"]`).classList.add("active");
     $(`.tab-page[data-page="preview"]`).classList.add("active");
     toast("画面已生成，可预览并导入");
+    // V4 集成：同步 IR 到 V4 工作台
+    if (j.ir && window.V4_onGenerationResult) {
+      try { window.V4_onGenerationResult(j.ir); } catch(e) { /* silent */ }
+    }
   } catch (e) { toast("生成异常：" + e, true); }
 }
 
@@ -826,6 +834,10 @@ async function connectOpenness() {
       }
       // 获取 HMI 能力信息
       fetchCapabilities();
+      // V4 集成：同步连接状态
+      if (window.V4 && window.V4.stores && window.V4.stores.OpenStore) {
+        try { window.V4.stores.OpenStore.setConnected(true); } catch(e) { /* silent */ }
+      }
     } else {
       const errMsg = j.message || j.error || "未知错误";
       log("连接失败：" + errMsg, "err"); toast("连接失败：" + errMsg, true);
@@ -857,6 +869,10 @@ async function disconnectOpenness() {
   if (cap) cap.style.display = "none";
   if (btn) btn.textContent = "断开";
   toast("已断开连接");
+  // V4 集成：同步断开状态
+  if (window.V4 && window.V4.stores && window.V4.stores.OpenStore) {
+    try { window.V4.stores.OpenStore.setConnected(false); } catch(e) { /* silent */ }
+  }
 }
 
 async function fetchCapabilities() {

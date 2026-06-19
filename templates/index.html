@@ -373,6 +373,59 @@
   </section>
 </div>
 
+<!-- ============ V4.0 部署工作台 ============ -->
+<div class="v4-workspace" id="v4Workspace">
+  <div class="v4-workspace-header">
+    <span class="v4-workspace-title">⚙ HMI 部署控制台</span>
+    <div class="v4-target-row">
+      <label>HMI 类型</label>
+      <select id="v4TargetFamily">
+        <option value="basic">Basic Panel</option>
+        <option value="comfort" selected>Comfort Panel</option>
+        <option value="unified">Unified Panel</option>
+      </select>
+      <label>TIA 版本</label>
+      <select id="v4TargetTiaVersion">
+        <option value="V16">V16</option>
+        <option value="V17">V17</option>
+        <option value="V18">V18</option>
+        <option value="V19">V19</option>
+        <option value="V20" selected>V20</option>
+      </select>
+      <label>设备</label>
+      <input id="v4TargetDevice" placeholder="如 TP1200" style="width:110px">
+      <label class="check" title="启用后部署仅做预演，不导入 TIA"><input type="checkbox" id="v4DryRunToggle" checked><span class="box"></span>Dry-Run</label>
+    </div>
+    <div class="v4-workspace-actions">
+      <button class="btn" id="v4BtnValidate" title="校验 IR 完整性">校验</button>
+      <button class="btn" id="v4BtnPlan" title="生成部署计划">计划</button>
+      <button class="btn btn-primary" id="v4BtnDeploy" title="执行导入（Dry-Run 或真实部署）">部署</button>
+      <button class="btn" id="v4BtnCompile" title="编译项目">编译</button>
+      <button class="btn" id="v4BtnVerify" title="验证导入结果">验证</button>
+      <button class="btn" id="v4BtnReset" title="重置部署状态">重置</button>
+    </div>
+  </div>
+
+  <div class="v4-workspace-body" id="v4WorkspaceBody">
+    <!-- 左列：工程数据 -->
+    <div class="v4-col">
+      <div id="v4TemplateUploader"></div>
+      <div id="v4TemplatePrototypePanel"></div>
+      <div id="v4CapabilityPanel"></div>
+      <div id="v4VariableTable"></div>
+      <div id="v4BindingTable"></div>
+    </div>
+    <!-- 右列：部署状态 -->
+    <div class="v4-col">
+      <div id="v4DeploymentStatus"></div>
+      <div id="v4DeploymentTimeline"></div>
+      <div id="v4CompileResult"></div>
+      <div id="v4VerificationResult"></div>
+      <div id="v4DiagnosticsPanel"></div>
+    </div>
+  </div>
+</div>
+
 <!-- ============ 设置模态：模型与接口 ============ -->
 <div class="modal-mask" id="settingsModal">
   <div class="modal">
@@ -461,5 +514,16 @@
 <div class="toast" id="toast"></div>
 
 <script src="{{ url_for('static', filename='js/app.js') }}?v=2"></script>
+<script type="module">
+  import { initV4, onGenerationResult } from "{{ url_for('static', filename='js/v4Main.js') }}";
+  // 等待 DOM 就绪后初始化
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => initV4());
+  } else {
+    initV4();
+  }
+  // 暴露给 app.js 调用
+  window.V4_onGenerationResult = onGenerationResult;
+</script>
 </body>
 </html>
