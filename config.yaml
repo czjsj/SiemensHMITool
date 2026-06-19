@@ -35,7 +35,11 @@ openness:
     template_export_dir: exports/templates
     generated_xml_dir: exports/generated_from_template
     import_option: Override
-  # V4.0: 模板原型系统配置
+  unified_direct:
+    enabled: true
+    update_existing_screen: true
+    clear_existing_items: true
+    unsupported_object_policy: warn
   template:
     enabled: true
     require_prototype_for_button: true
@@ -46,16 +50,10 @@ openness:
     fallback_to_simaticml: false
     allow_missing_indicator_template: false
     allow_missing_button_template: false
-  # V4.0: 部署顺序配置
   deployment:
     import_tags_before_screens: true
     compile_after_import: true
     verify_after_compile: true
-  unified_direct:
-    enabled: true
-    update_existing_screen: true
-    clear_existing_items: true
-    unsupported_object_policy: warn
   default_templates:
     basic:
       enabled: false
@@ -78,7 +76,7 @@ output:
   export_dir: exports
   encoding: utf-8-sig
   reference_xml: "\uFEFF<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Document>\n \
-    \ <Engineering version=\"V16\" />\n  <DocumentInfo>\n    <Created>2026-06-19T13:08:55.1036045Z</Created>\n\
+    \ <Engineering version=\"V16\" />\n  <DocumentInfo>\n    <Created>2026-06-19T14:55:46.4731697Z</Created>\n\
     \    <ExportSetting>WithDefaults</ExportSetting>\n    <InstalledProducts>\n  \
     \    <Product>\n        <DisplayName>Totally Integrated Automation Portal</DisplayName>\n\
     \        <DisplayVersion>V16 Update 8</DisplayVersion>\n      </Product>\n   \
