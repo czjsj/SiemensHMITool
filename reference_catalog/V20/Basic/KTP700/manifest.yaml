@@ -1,0 +1,23 @@
+catalog_version: 1
+key:
+  tia_version: V20
+  family: basic
+  device_type: KTP700 Basic
+  resolution: 800x480
+source:
+  exported_at: 2026-06-19
+  project_name: HMI_Golden_V20_Basic
+fragments:
+  screens.base_screen: V20/Basic/KTP700/screens/base_screen.xmlfrag
+  controls.button: V20/Basic/KTP700/controls/button.xmlfrag
+  controls.io_field: V20/Basic/KTP700/controls/io_field.xmlfrag
+  controls.text_field: V20/Basic/KTP700/controls/text_field.xmlfrag
+  controls.circle: V20/Basic/KTP700/controls/circle.xmlfrag
+  events.set_bit: V20/Basic/KTP700/events/set_bit.xmlfrag
+  events.reset_bit: V20/Basic/KTP700/events/reset_bit.xmlfrag
+  events.toggle_bit: V20/Basic/KTP700/events/toggle_bit.xmlfrag
+  dynamics.visible: V20/Basic/KTP700/dynamics/visible.xmlfrag
+  dynamics.backcolor_discrete: V20/Basic/KTP700/dynamics/backcolor_discrete.xmlfrag
+  dynamics.flashing: V20/Basic/KTP700/dynamics/flashing.xmlfrag
+  tags.internal_bool: V20/Basic/KTP700/tags/internal_bool.xmlfrag
+  tags.external_real: V20/Basic/KTP700/tags/external_real.xmlfrag

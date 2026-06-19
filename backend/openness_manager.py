@@ -29,6 +29,18 @@ except Exception:
 
 
 class OpennessManager:
+    """TIA Portal Openness Façade — 向后兼容的入口。
+
+    V3.0 内部委托给 modular 子模块:
+      - SessionManager    → 连接/断开/诊断
+      - DeviceDiscovery   → HMI 设备查找与类型识别
+      - HmiCompiler       → 编译触发
+      - ExceptionMapper   → .NET 异常 → Diagnostic
+      - AssemblyLoader    → DLL 加载与版本元数据
+
+    旧 API 完全保留，不作破坏性变更。
+    """
+
     def __init__(self, config: dict):
         self.cfg = config["openness"]
         self.output_cfg = config.get("output", {})
@@ -36,6 +48,56 @@ class OpennessManager:
         self._portal = None
         self._project = None
         self._tia = None          # Siemens.Engineering 命名空间引用
+
+        # ---- V3.0 委托实例 (lazy-init 以保持向后兼容) ----
+        self._session_mgr = None
+        self._device_discovery = None
+        self._compiler = None
+        self._exception_mapper = None
+        self._assembly_loader = None
+
+    # ---- V3.0 委托属性 ----
+
+    @property
+    def session(self):
+        if self._session_mgr is None:
+            from backend.openness.session_manager import SessionManager
+            self._session_mgr = SessionManager({
+                "openness": self.cfg,
+                "hmi_defaults": self.hmi_defaults,
+            })
+        return self._session_mgr
+
+    @property
+    def device_discovery(self):
+        if self._device_discovery is None:
+            from backend.openness.device_discovery import DeviceDiscovery
+            self._device_discovery = DeviceDiscovery({
+                "openness": self.cfg,
+                "hmi_defaults": self.hmi_defaults,
+            })
+        return self._device_discovery
+
+    @property
+    def compiler(self):
+        if self._compiler is None:
+            from backend.openness.compiler import HmiCompiler
+            self._compiler = HmiCompiler()
+        return self._compiler
+
+    @property
+    def exception_mapper(self):
+        if self._exception_mapper is None:
+            from backend.openness.exception_mapper import ExceptionMapper
+            self._exception_mapper = ExceptionMapper()
+        return self._exception_mapper
+
+    @property
+    def assembly_loader(self):
+        if self._assembly_loader is None:
+            from backend.openness.assembly_loader import AssemblyLoader
+            self._assembly_loader = AssemblyLoader()
+        return self._assembly_loader
 
     # ---------------- 诊断 ----------------
     def diagnose(self) -> dict:

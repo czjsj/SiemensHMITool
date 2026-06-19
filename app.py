@@ -505,6 +505,125 @@ def openness_disconnect():
     return jsonify(get_openness().disconnect())
 
 
+# --------------------------------------------------------------------------
+# V3.0 新 API — 部署计划与能力查询
+# --------------------------------------------------------------------------
+
+@app.route("/api/hmi/plan", methods=["POST"])
+def hmi_plan():
+    """构建部署计划（dry-run 预览）。
+
+    请求格式:
+        {
+            "project": { "schema_version": "2.0", ... },   // HmiProjectSpec
+            "options": {
+                "dry_run": true,
+                "conflict_policy": "rename",
+                "compile_after_deploy": true
+            }
+        }
+
+    返回 DeploymentPlan JSON。
+    """
+    try:
+        body = request.get_json(force=True)
+    except Exception:
+        return jsonify({"ok": False, "error": "请求体必须为 JSON"}), 400
+
+    from backend.domain.ir_v2 import HmiProjectSpec
+    from backend.domain.deployment_plan import DeploymentPlan
+    from backend.planners.deployment_planner import DeploymentPlanner
+    from backend.capabilities.capability_service import CapabilityService
+
+    project_data = body.get("project")
+    options = body.get("options", {})
+
+    if not project_data:
+        return jsonify({"ok": False, "error": "缺少 project 字段"}), 400
+
+    try:
+        project = HmiProjectSpec.model_validate(project_data)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"project 校验失败: {e}"}), 400
+
+    # 覆盖 dry_run
+    dry_run = options.get("dry_run", True)
+
+    # 使用能力服务
+    cap_svc = CapabilityService()
+    planner = DeploymentPlanner(cap_svc)
+
+    plan = planner.build_plan(project, dry_run=dry_run)
+
+    return jsonify({
+        "ok": True,
+        "plan": plan.model_dump(),
+    })
+
+
+@app.route("/api/hmi/capabilities", methods=["GET"])
+def hmi_capabilities():
+    """查询目标设备能力矩阵（静态 + 已连接设备的运行时信息）。
+
+    可选 query 参数:
+        family: basic | comfort | unified
+        tia_version: V16 | V18 | V20
+    """
+    from backend.capabilities.capability_service import CapabilityService
+    from backend.domain.ir_v2 import TargetSpec
+    from backend.domain.enums import HmiFamily
+
+    family = request.args.get("family", "auto")
+    tia_version = request.args.get("tia_version", None)
+
+    try:
+        family_enum = HmiFamily(family)
+    except ValueError:
+        family_enum = HmiFamily.AUTO
+
+    target = TargetSpec(family=family_enum, tia_version=tia_version)
+    cap_svc = CapabilityService()
+    caps = cap_svc.resolve(target)
+
+    # 如果已连接 TIA，附加运行时信息
+    runtime_info = {}
+    try:
+        mgr = get_openness()
+        if getattr(mgr, "_portal", None) is not None:
+            hmi_caps = mgr.get_hmi_capabilities()
+            runtime_info = {
+                "connected": True,
+                "hmi_software_type": hmi_caps.get("hmi_software_type"),
+                "recommended_mode": hmi_caps.get("recommended_mode"),
+            }
+    except Exception:
+        pass
+
+    return jsonify({
+        "ok": True,
+        "family": family_enum.value,
+        "tia_version": tia_version,
+        "capabilities": caps.to_dict(),
+        "runtime": runtime_info,
+    })
+
+
+@app.route("/api/hmi/runtime-metadata", methods=["GET"])
+def hmi_runtime_metadata():
+    """获取已连接 TIA 的运行时元数据（版本、DLL 等）。"""
+    try:
+        mgr = get_openness()
+        diagnose = mgr.diagnose()
+        caps = mgr.get_hmi_capabilities()
+        return jsonify({
+            "ok": True,
+            "diagnose": diagnose,
+            "capabilities": caps,
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 if __name__ == "__main__":
     cfg = cfgm.load_config()
     server = cfg.get("server", {})
