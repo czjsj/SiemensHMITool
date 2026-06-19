@@ -22,6 +22,15 @@ VALID_MODES = {"Input", "Output", "InputOutput"}
 VALID_FORMATS = {"Decimal", "String", "Hex", "Binary"}
 VALID_DATATYPES = {"Bool", "Int", "DInt", "Real", "Word", "String"}
 VALID_HMI_TYPES = {"Basic", "Comfort", "Unified"}
+VALID_TAG_MODES = {"momentary", "toggle"}
+
+# 变量命名前缀规则（VariableEngine 同步）
+TAG_PREFIX_MAP = {
+    "Button":    "BTN_",        # 瞬时按钮
+    "Indicator": "STS_",        # 运行/状态指示灯（报警类用 LMP_）
+    "IOField":   "IO_",
+    "SymbolicIOField": "SIO_",
+}
 VALID_RES = {
     "1920x1080", "1280x800", "1024x768", "800x480", "480x272",
     "640x480", "320x240"
@@ -358,9 +367,21 @@ def validate_ir(ir: dict) -> dict:
             base["height"] = int(o.get("height", 40))
             mode = o.get("mode", "Output")
             base["mode"] = mode if mode in VALID_MODES else "Output"
-            tag = _req(o, "process_tag", where)
+            # 自动生成 process_tag（若缺失则按前缀规则默认）
+            prefix = TAG_PREFIX_MAP.get(otype, "IO_")
+            tag = o.get("process_tag") or f"{prefix}{oid}"
             if tag not in tag_names:
-                warnings.append(f"{where}({oid}) 关联变量 '{tag}' 未在 tags 中声明")
+                # 自动补全到 tags 列表
+                dtype = o.get("data_type", "Real")
+                if dtype not in VALID_DATATYPES:
+                    dtype = "Real" if otype == "IOField" else "Int"
+                ir.setdefault("tags", []).append({
+                    "name": tag, "data_type": dtype,
+                    "address": o.get("address", ""),
+                    "comment": f"自动生成 — {o.get('label', oid)}",
+                })
+                tag_names.add(tag)
+                warnings.append(f"{where}({oid}) 变量 '{tag}' 自动添加到 tags 列表。")
             base["process_tag"] = tag
             base["font_size"] = int(o.get("font_size", 16))
             base["label"] = o.get("label", "")
@@ -370,8 +391,10 @@ def validate_ir(ir: dict) -> dict:
                 base["decimal_digits"] = int(o.get("decimal_digits", 0))
                 base["unit"] = o.get("unit", "")
             else:
-                tl = _req(o, "text_list", where)
-                if tl not in list_names:
+                tl = o.get("text_list") or ""
+                if not tl:
+                    warnings.append(f"{where}({oid}) SymbolicIOField 缺少 text_list 引用")
+                elif tl not in list_names:
                     warnings.append(f"{where}({oid}) 引用文本列表 '{tl}' 未声明")
                 base["text_list"] = tl
 
@@ -379,6 +402,23 @@ def validate_ir(ir: dict) -> dict:
             base["width"] = int(o.get("width", 120))
             base["height"] = int(o.get("height", 50))
             base["text"] = o.get("text", "按钮")
+            # 自动生成 process_tag（若缺失则按前缀规则默认）
+            tag_mode = o.get("tag_mode") or "momentary"
+            if tag_mode not in VALID_TAG_MODES:
+                tag_mode = "momentary"
+            base["tag_mode"] = tag_mode
+            btn_prefix = "MEM_" if tag_mode == "toggle" else "BTN_"
+            btn_tag = o.get("process_tag") or f"{btn_prefix}{oid}"
+            if btn_tag not in tag_names:
+                ir.setdefault("tags", []).append({
+                    "name": btn_tag, "data_type": "Bool",
+                    "address": o.get("address", ""),
+                    "comment": f"自动生成 — {o.get('text', oid)}"
+                           f"{'（自保持切换）' if tag_mode == 'toggle' else '（瞬时按钮）'}",
+                })
+                tag_names.add(btn_tag)
+                warnings.append(f"{where}({oid}) 变量 '{btn_tag}' 自动添加到 tags 列表。")
+            base["process_tag"] = btn_tag
             for ev in ("press_script", "release_script", "click_script"):
                 sc = o.get(ev)
                 if sc and sc not in script_names:
@@ -388,10 +428,25 @@ def validate_ir(ir: dict) -> dict:
 
         elif otype == "Indicator":
             base["radius"] = int(o.get("radius", 22))
-            tag = _req(o, "process_tag", where)
-            if tag not in tag_names:
-                warnings.append(f"{where}({oid}) 关联变量 '{tag}' 未声明")
-            base["process_tag"] = tag
+            # 自动生成 process_tag（若缺失则按前缀规则默认；报警类用 LMP_，状态类用 STS_）
+            is_alarm_like = bool(
+                o.get("blink") or
+                (o.get("color_on") or "").startswith("#E2") or
+                (o.get("color_on") or "").startswith("#e2")
+            )
+            ind_prefix = "LMP_" if is_alarm_like else "STS_"
+            ind_tag = o.get("process_tag") or f"{ind_prefix}{oid}"
+            if ind_tag not in tag_names:
+                ir.setdefault("tags", []).append({
+                    "name": ind_tag, "data_type": "Bool",
+                    "address": o.get("address", ""),
+                    "comment": f"自动生成 — {o.get('label', oid)}"
+                           f"{'（报警/故障指示）' if is_alarm_like else '（状态指示）'}",
+                })
+                tag_names.add(ind_tag)
+                warnings.append(f"{where}({oid}) 变量 '{ind_tag}' 自动添加到 tags 列表。")
+            base["process_tag"] = ind_tag
+            base["blink_tag"] = o.get("blink_tag") or (ind_tag if o.get("blink") else None)
             base["color_on"] = o.get("color_on", "#27D17F")
             base["color_off"] = o.get("color_off", "#3A4250")
             base["blink"] = bool(o.get("blink", False))

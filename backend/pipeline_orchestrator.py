@@ -27,6 +27,7 @@ from .preview_renderer import render_ir_to_png
 from .mimo_client import analyze_with_mimo
 from .review_prompts import HMI_REVIEW_TASK, IMAGE_ANALYSIS_TASK, build_review_feedback_text
 from .tia_text_sanitizer import sanitize_ir_text_fields
+from .variable_engine import VariableEngine
 
 
 
@@ -218,6 +219,13 @@ def run_pipeline(
     # ---- 清洗 IR 文本字段（去除 HTML/富文本，确保 TIA 兼容） ----
     ir = sanitize_ir_text_fields(ir)
 
+    # ---- 变量引擎：自动绑定 process_tag + 生成 HMI Tags + VBS 脚本 ----
+    var_engine = VariableEngine()
+    ir = var_engine.generate(ir)
+    yield ("variable_bind", {
+        "summary": VariableEngine.get_binding_summary(ir),
+    })
+
     # ---- 如果审查未启用，直接返回 ----
     if not review_enabled:
         yield ("pipeline_done", {
@@ -326,6 +334,8 @@ def run_pipeline(
             current_ir = _adapt_ir_to_target_resolution(current_ir, config)
             # ---- 清洗修正后的 IR 文本字段 ----
             current_ir = sanitize_ir_text_fields(current_ir)
+            # ---- 变量引擎：重新绑定（修正后可能有新对象） ----
+            current_ir = var_engine.generate(current_ir)
             yield ("parsed_ok", {"hint": f"第 {iteration + 1} 轮修正完成，准备再次审查。"})
         except Exception as pe:
             yield ("parse_warn", f"修正后 IR 解析失败: {pe}")

@@ -31,6 +31,7 @@ from backend.simaticml_generator import generate_simaticml
 from backend.openness_manager import OpennessManager
 from backend.template_xml_generator import generate_from_template_xml
 from backend.pipeline_orchestrator import run_pipeline
+from backend.variable_engine import VariableEngine
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__,
@@ -270,6 +271,8 @@ def build():
     try:
         ir = extract_json(raw)
         ir = validate_ir(ir)
+        # ---- 变量引擎：自动绑定 process_tag + 生成 HMI Tags + VBS 脚本 ----
+        ir = VariableEngine().generate(ir)
     except (IRValidationError, ValueError) as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 
@@ -412,6 +415,8 @@ def build_template_xml():
 
     try:
         ir = validate_ir(ir_data)
+        # ---- 变量引擎：自动绑定 process_tag + 生成 HMI Tags + VBS 脚本 ----
+        ir = VariableEngine().generate(ir)
     except (IRValidationError, ValueError) as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 
@@ -458,6 +463,12 @@ def openness_import():
 
     # 新模式：IR + mode（自动路由）
     if ir_data:
+        # ---- 变量引擎预处理（统一在导入前绑定变量） ----
+        try:
+            ir_data = validate_ir(ir_data)
+            ir_data = VariableEngine().generate(ir_data)
+        except (IRValidationError, ValueError) as e:
+            return jsonify({"ok": False, "error": f"IR 校验失败：{e}"}), 400
         if mode in ("unified_direct", "classic_template_xml", "simaticml", "auto"):
             result = get_openness().import_or_generate_from_ir(ir_data, mode)
             return jsonify(result)
@@ -465,7 +476,7 @@ def openness_import():
         cfg = cfgm.load_config()
         tia_version = cfg["openness"].get("tia_version", "V18")
         ref_template = cfg.get("output", {}).get("reference_xml", "")
-        ir = validate_ir(ir_data)
+        ir = ir_data  # 已通过 validate + VariableEngine 处理
         xml = generate_simaticml(ir, tia_version, ref_template)
         export_dir = os.path.join(BASE_DIR, cfg["output"].get("export_dir", "exports"))
         os.makedirs(export_dir, exist_ok=True)
@@ -477,6 +488,16 @@ def openness_import():
     if not xml_path or not os.path.exists(xml_path):
         return jsonify({"imported": False, "error": "XML 路径无效，请先生成画面。"}), 400
     return jsonify(get_openness().import_screen(xml_path))
+
+
+@app.route("/api/openness/sync-tags", methods=["POST"])
+def openness_sync_tags():
+    """手动同步变量到 TIA HMI 变量表。"""
+    body = request.get_json(force=True)
+    tags = body.get("tags") or []
+    if not tags:
+        return jsonify({"ok": False, "error": "tags 数组为空"}), 400
+    return jsonify(get_openness().sync_tags(tags))
 
 
 @app.route("/api/openness/disconnect", methods=["POST"])

@@ -76,6 +76,8 @@ IR_SCHEMA_DOC = r"""
       "type": "Button",
       "x": 100, "y": 260, "width": 120, "height": 50,
       "text": "按钮上的中文文字，如 启动",
+      "process_tag": "关联的变量名，如 BTN_Start；必须出现在 tags 中",
+      "tag_mode": "枚举：momentary（瞬时，按下置1释放置0）| toggle（自保持切换）",
       "press_script": "按下时执行的 VBS 子程序名，必须出现在 scripts 中；无则 null",
       "release_script": "松开时执行的脚本名；无则 null",
       "click_script": "单击时执行的脚本名；无则 null",
@@ -86,7 +88,8 @@ IR_SCHEMA_DOC = r"""
       "id": "LMP_Run",
       "type": "Indicator",
       "x": 400, "y": 120, "radius": 24,
-      "process_tag": "关联的 Bool 变量名",
+      "process_tag": "关联的 Bool 变量名，如 STS_Run；必须出现在 tags 中",
+      "blink_tag": "可选，闪烁绑定的变量（通常与 process_tag 相同）",
       "color_on": "亮起颜色，如 #27D17F",
       "color_off": "熄灭颜色，如 #3A4250",
       "blink": false,
@@ -126,7 +129,28 @@ TEXT_CONVENTIONS = r"""
 5. 故障/报警类指示灯优先使用红色系并置 blink=true；运行类用绿色系；
    通用状态可用青色 #14E0B1。
 6. 文字简洁，按钮文字不超过 6 个汉字，标题不超过 16 个汉字。
-7. 对于同一页面中的同类命名，保持前后一致，不要同时出现“运行/启动中/工作中”等混杂表达。
+7. 对于同一页面中的同类命名，保持前后一致，不要同时出现"运行/启动中/工作中"等混杂表达。
+"""
+
+TAG_CONVENTIONS = r"""
+【变量绑定硬性规范 — 必须严格遵守】
+1. 所有 Button / Indicator / IOField / SymbolicIOField 对象都必须包含 process_tag 字段。
+2. 变量名（process_tag）命名前缀规则：
+   - 瞬时按钮 → BTN_ 前缀，例如 BTN_Start、BTN_Stop
+   - 自保持/切换按钮 → MEM_ 前缀，例如 MEM_Mode、MEM_HandAuto
+     判断依据：按钮文字含"切换/自保持/手动自动/本地远程/正转反转"等词 → MEM_；
+              普通启停/复位 → BTN_
+   - 运行/状态指示灯 → STS_ 前缀，例如 STS_Run、STS_Ready
+   - 故障/报警指示灯 → LMP_ 前缀，例如 LMP_Fault、LMP_Alarm
+     判断依据：文字含"故障/报警/急停/过载/异常"或置了 blink=true → LMP_
+   - 数值 IO 域 → IO_ 前缀，例如 IO_Speed、IO_Temp
+   - 符号 IO 域 → SIO_ 前缀，例如 SIO_Mode、SIO_State
+3. 每个声明的 process_tag 对应的变量必须出现在 tags 数组中。
+4. 按钮必须标注 tag_mode：
+   - "momentary"：瞬时按钮（按下置1，释放置0）
+   - "toggle"：自保持切换按钮（每次按下翻转状态）
+5. 指示灯对象可选 blink_tag 字段（用于指定闪烁绑定的变量，通常与 process_tag 相同）。
+6. 不允许使用没有意义的变量名如 var1、tag2、temp。
 """
 
 VBS_CONVENTIONS = r"""
@@ -198,7 +222,7 @@ SYSTEM_PROMPT = f"""你是一名资深的西门子 WinCC / 博途(TIA Portal) HM
 
 【工作方式】
 - 先梳理需求涉及的状态量、操作量、显示量，再决定每个对象的类型、位置、关联变量。
-- 优先做“工程可交付”的版式，而不是随意摆放控件。
+- 优先做"工程可交付"的版式，而不是随意摆放控件。
 - 如果需求没有给出坐标，你必须主动生成整齐、均衡、易读的布局。
 - 凡是 IO 域 / 符号 IO 域 / 指示灯关联到的变量，都必须在 tags 中声明；
   符号 IO 域引用的文本列表必须在 text_lists 中声明；
@@ -207,6 +231,8 @@ SYSTEM_PROMPT = f"""你是一名资深的西门子 WinCC / 博途(TIA Portal) HM
 - 你生成的是工程化 HMI，不是插画；稳定、清晰、规整比花哨更重要。
 
 {TEXT_CONVENTIONS}
+
+{TAG_CONVENTIONS}
 
 {VBS_CONVENTIONS}
 

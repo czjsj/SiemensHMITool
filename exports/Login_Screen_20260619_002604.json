@@ -1,0 +1,215 @@
+{
+  "meta": {
+    "screen_name": "Login_Screen",
+    "title": "操作员登录",
+    "description": "操作员登录界面：用户名/密码输入，登录/退出按钮，登录状态指示灯。VBS脚本硬编码校验账号admin/123456。",
+    "resolution": "800x480",
+    "hmi_type": "Comfort",
+    "generation_mode": "auto",
+    "template_screen": "",
+    "template_xml": ""
+  },
+  "tags": [
+    {
+      "name": "Login_Username",
+      "data_type": "String",
+      "address": "",
+      "comment": "用户名"
+    },
+    {
+      "name": "Login_Password",
+      "data_type": "String",
+      "address": "",
+      "comment": "密码"
+    },
+    {
+      "name": "Login_Online",
+      "data_type": "Bool",
+      "address": "",
+      "comment": "在线状态"
+    },
+    {
+      "name": "Login_BtnLogin",
+      "data_type": "Bool",
+      "address": "",
+      "comment": "登录按钮按下标志"
+    },
+    {
+      "name": "Login_BtnLogout",
+      "data_type": "Bool",
+      "address": "",
+      "comment": "退出按钮按下标志"
+    }
+  ],
+  "text_lists": [],
+  "objects": [
+    {
+      "id": "TXT_Title",
+      "type": "Text",
+      "x": 200,
+      "y": 30,
+      "width": 400,
+      "height": 44,
+      "text": "操作员登录",
+      "font_size": 22,
+      "bold": true,
+      "color": "#E6EDF3"
+    },
+    {
+      "id": "TXT_UserLabel",
+      "type": "Text",
+      "x": 160,
+      "y": 120,
+      "width": 90,
+      "height": 36,
+      "text": "用户名",
+      "font_size": 18,
+      "bold": false,
+      "color": "#E6EDF3"
+    },
+    {
+      "id": "IO_Username",
+      "type": "IOField",
+      "x": 270,
+      "y": 120,
+      "width": 220,
+      "height": 40,
+      "mode": "Input",
+      "process_tag": "Login_Username",
+      "font_size": 18,
+      "label": "",
+      "display_format": "String",
+      "decimal_digits": 0,
+      "unit": ""
+    },
+    {
+      "id": "TXT_PasswordLabel",
+      "type": "Text",
+      "x": 160,
+      "y": 190,
+      "width": 90,
+      "height": 36,
+      "text": "密码",
+      "font_size": 18,
+      "bold": false,
+      "color": "#E6EDF3"
+    },
+    {
+      "id": "IO_Password",
+      "type": "IOField",
+      "x": 270,
+      "y": 190,
+      "width": 220,
+      "height": 40,
+      "mode": "Input",
+      "process_tag": "Login_Password",
+      "font_size": 18,
+      "label": "",
+      "display_format": "String",
+      "decimal_digits": 0,
+      "unit": ""
+    },
+    {
+      "id": "BTN_Login",
+      "type": "Button",
+      "x": 210,
+      "y": 280,
+      "width": 130,
+      "height": 50,
+      "text": "登录",
+      "tag_mode": "momentary",
+      "process_tag": "Login_BtnLogin",
+      "press_script": "Sub_Login",
+      "release_script": "Sub_BTN_Login_Release",
+      "click_script": null,
+      "background_color": "#27D17F"
+    },
+    {
+      "id": "BTN_Logout",
+      "type": "Button",
+      "x": 380,
+      "y": 280,
+      "width": 130,
+      "height": 50,
+      "text": "退出",
+      "tag_mode": "momentary",
+      "process_tag": "Login_BtnLogout",
+      "press_script": "Sub_Logout",
+      "release_script": "Sub_BTN_Logout_Release",
+      "click_script": null,
+      "background_color": "#E25563"
+    },
+    {
+      "id": "LMP_Online",
+      "type": "Indicator",
+      "x": 250,
+      "y": 388,
+      "radius": 20,
+      "process_tag": "Login_Online",
+      "blink_tag": null,
+      "color_on": "#27D17F",
+      "color_off": "#3A4250",
+      "blink": false,
+      "label": ""
+    },
+    {
+      "id": "TXT_OnlineLabel",
+      "type": "Text",
+      "x": 290,
+      "y": 368,
+      "width": 150,
+      "height": 36,
+      "text": "在线状态",
+      "font_size": 18,
+      "bold": false,
+      "color": "#E6EDF3"
+    }
+  ],
+  "scripts": [
+    {
+      "name": "Sub_Login",
+      "language": "VBS",
+      "purpose": "校验用户名密码，硬编码admin/123456，正确则置位在线状态，否则提示",
+      "code": "' 登录校验\nDim sUser, sPwd\nsUser = SmartTags(\"Login_Username\")\nsPwd = SmartTags(\"Login_Password\")\nIf sUser = \"admin\" And sPwd = \"123456\" Then\n    SmartTags(\"Login_Online\") = 1\nElse\n    MsgBox \"用户名或密码错误！\", vbExclamation, \"登录失败\"\n    SmartTags(\"Login_Online\") = 0\nEnd If"
+    },
+    {
+      "name": "Sub_Logout",
+      "language": "VBS",
+      "purpose": "退出登录，清除在线状态",
+      "code": "' 退出登录\nSmartTags(\"Login_Online\") = 0"
+    },
+    {
+      "name": "Sub_BTN_Login_Press",
+      "language": "VBS",
+      "purpose": "按钮「登录」— 按下置位 Login_BtnLogin",
+      "code": "' 按钮「登录」按下 — 按下置位\nSmartTags(\"Login_BtnLogin\") = 1\n"
+    },
+    {
+      "name": "Sub_BTN_Login_Release",
+      "language": "VBS",
+      "purpose": "按钮「登录」— 释放复位 Login_BtnLogin",
+      "code": "' 按钮「登录」释放 — 释放复位\nSmartTags(\"Login_BtnLogin\") = 0\n"
+    },
+    {
+      "name": "Sub_BTN_Logout_Press",
+      "language": "VBS",
+      "purpose": "按钮「退出」— 按下置位 Login_BtnLogout",
+      "code": "' 按钮「退出」按下 — 按下置位\nSmartTags(\"Login_BtnLogout\") = 1\n"
+    },
+    {
+      "name": "Sub_BTN_Logout_Release",
+      "language": "VBS",
+      "purpose": "按钮「退出」— 释放复位 Login_BtnLogout",
+      "code": "' 按钮「退出」释放 — 释放复位\nSmartTags(\"Login_BtnLogout\") = 0\n"
+    }
+  ],
+  "_warnings": [
+    "已对 IR 自动执行轻量布局优化：对齐、最小间距、重叠与越界修正。"
+  ],
+  "_screen_size": {
+    "width": 800,
+    "height": 480
+  },
+  "_layout_optimized": true,
+  "_variable_engine_applied": true
+}

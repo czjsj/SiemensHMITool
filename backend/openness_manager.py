@@ -909,6 +909,107 @@ class OpennessManager:
         compiler.Compile()
 
     # ------------------------------------------------------------------
+    # 变量表同步（VariableEngine 集成）
+    # ------------------------------------------------------------------
+    def sync_tags(self, tags: list) -> dict:
+        """将 HMI Tags 自动写入 TIA Portal 项目的 HMI 变量表。
+
+        参数:
+            tags: IR 中的 tags 数组，每项含 name/data_type/address/comment。
+
+        返回:
+            {"ok": True/False, "created": [...], "skipped": [...], "errors": [...]}
+        """
+        result: dict = {"ok": False, "created": [], "skipped": [], "errors": []}
+
+        if not self._project:
+            result["errors"].append("尚未连接到博途项目。")
+            return result
+
+        try:
+            sw = self._find_hmi_software()
+            if sw is None:
+                result["errors"].append("未找到 HMI 设备。")
+                return result
+
+            # 获取或创建默认变量表
+            try:
+                tag_tables = list(sw.TagTables)
+                if tag_tables:
+                    table = tag_tables[0]
+                else:
+                    table = sw.TagTables.Create("Default tag table")
+                    result["created"].append("已创建默认变量表 'Default tag table'")
+            except Exception as e:
+                # 某些 TIA 版本中 TagTables 可能不在 HmiTarget 直接层级
+                # 尝试从 HmiTarget 获取
+                try:
+                    table = sw.TagTables[0]
+                except Exception:
+                    result["errors"].append(
+                        f"无法访问 HMI 变量表：{e}。"
+                        f"请确认 HMI 设备已正确配置。"
+                    )
+                    return result
+
+            # 收集已有变量名（避免重复创建）
+            existing_names = set()
+            try:
+                for tag in table.Tags:
+                    try:
+                        existing_names.add(str(tag.Name))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            for t in tags:
+                name = str(t.get("name", "")).strip()
+                if not name:
+                    continue
+                if name in existing_names:
+                    result["skipped"].append(name)
+                    continue
+
+                data_type = str(t.get("data_type", "Bool")).strip()
+                # TIA 中数据类型名称映射
+                tia_type_map = {
+                    "Bool": "Bool", "Int": "Int", "DInt": "DInt",
+                    "Real": "Real", "Word": "Word", "String": "String",
+                }
+                tia_type = tia_type_map.get(data_type, "Bool")
+
+                try:
+                    new_tag = table.Tags.Create(name, tia_type)
+                    # 设置地址（如有）
+                    address = str(t.get("address", "")).strip()
+                    if address:
+                        try:
+                            new_tag.Address = address
+                        except Exception:
+                            pass
+                    # 设置注释（如有）
+                    comment = str(t.get("comment", "")).strip()
+                    if comment:
+                        try:
+                            new_tag.Comment = comment
+                        except Exception:
+                            pass
+                    result["created"].append(name)
+                    existing_names.add(name)
+                except Exception as e:
+                    result["errors"].append(f"创建变量 '{name}' 失败：{e}")
+
+            result["ok"] = len(result["created"]) > 0 or len(result["skipped"]) > 0
+            if not result["ok"] and not result["errors"]:
+                result["errors"].append("没有可创建的变量。")
+
+        except Exception as e:
+            result["errors"].append(f"同步变量表异常：{e}")
+
+        return result
+
+    # ------------------------------------------------------------------
     # 6.1.1 HMI 类型识别
     # ------------------------------------------------------------------
     def get_hmi_capabilities(self) -> dict:
@@ -1569,6 +1670,18 @@ class OpennessManager:
                             import_option=tmpl_cfg.get("import_option", "Override"),
                         )
 
+                        # ---- 自动同步 HMI 变量表 ----
+                        tag_sync_result = None
+                        if import_result.get("imported") and ir.get("tags"):
+                            try:
+                                tag_sync_result = self.sync_tags(ir["tags"])
+                                if tag_sync_result.get("created"):
+                                    warnings.append(
+                                        f"已同步 {len(tag_sync_result['created'])} 个变量到 HMI 变量表"
+                                    )
+                            except Exception as sync_e:
+                                warnings.append(f"HMI 变量表同步异常：{sync_e}")
+
                         return {
                             "ok": import_result.get("imported", False),
                             "mode": "classic_template_xml",
@@ -1577,6 +1690,7 @@ class OpennessManager:
                             "message": import_result.get("message") or import_result.get("error", ""),
                             "warnings": warnings,
                             "details": details,
+                            "tag_sync": tag_sync_result,
                         }
                     except Exception as e:
                         if is_basic:
@@ -1627,6 +1741,18 @@ class OpennessManager:
 
             import_result = self.import_screen(xml_path)
 
+            # ---- 自动同步 HMI 变量表 ----
+            tag_sync_result = None
+            if import_result.get("imported") and ir.get("tags"):
+                try:
+                    tag_sync_result = self.sync_tags(ir["tags"])
+                    if tag_sync_result.get("created"):
+                        warnings.append(
+                            f"已同步 {len(tag_sync_result['created'])} 个变量到 HMI 变量表"
+                        )
+                except Exception as sync_e:
+                    warnings.append(f"HMI 变量表同步异常：{sync_e}")
+
             return {
                 "ok": import_result.get("imported", False),
                 "mode": "simaticml",
@@ -1635,6 +1761,7 @@ class OpennessManager:
                 "message": import_result.get("message", ""),
                 "warnings": warnings,
                 "details": details,
+                "tag_sync": tag_sync_result,
             }
 
         # 不应到达

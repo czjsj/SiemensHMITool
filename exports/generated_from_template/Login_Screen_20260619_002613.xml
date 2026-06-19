@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Document>
   <Engineering version="V16" />
   <DocumentInfo>
@@ -49,7 +49,7 @@
       <BackColor>109, 109, 109</BackColor>
       <GridColor>0, 0, 0</GridColor>
       <Height>480</Height>
-      <Name>画面_1</Name>
+      <Name>Login_Screen</Name>
       <Number>1</Number>
       <Visible>true</Visible>
       <Width>800</Width>
@@ -81,18 +81,18 @@
               <EdgeStyle>Solid</EdgeStyle>
               <Flashing>None</Flashing>
               <Height>48</Height>
-              <Left>446</Left>
-              <ObjectName>圆_1</ObjectName>
+              <Left>250</Left>
+              <ObjectName>LMP_Online</ObjectName>
               <Radius>24</Radius>
               <TabIndex>-1</TabIndex>
-              <Top>91</Top>
+              <Top>388</Top>
               <UseDesignColorSchema>false</UseDesignColorSchema>
               <Width>48</Width>
             </AttributeList>
           </Hmi.Screen.Circle>
           <Hmi.Screen.Button ID="5" CompositionName="ScreenItems">
             <AttributeList>
-              <BackColor>99, 101, 113</BackColor>
+              <BackColor>39,209,127</BackColor>
               <BackFillStyle>GradientVertical</BackFillStyle>
               <BitNumber>0</BitNumber>
               <BorderBackColor>105, 105, 105</BorderBackColor>
@@ -109,14 +109,14 @@
               <FocusColor>148, 182, 231</FocusColor>
               <FocusWidth>2</FocusWidth>
               <ForeColor>255, 255, 255</ForeColor>
-              <Height>32</Height>
+              <Height>50</Height>
               <HorizontalAlignment>Center</HorizontalAlignment>
               <HorizontalPictureAlignment>Center</HorizontalPictureAlignment>
               <HotKey>0</HotKey>
-              <Left>328</Left>
+              <Left>210</Left>
               <MiddleGradientColor>99, 101, 113</MiddleGradientColor>
               <Mode>Text</Mode>
-              <ObjectName>按钮_1</ObjectName>
+              <ObjectName>BTN_Login</ObjectName>
               <PictureAreaBottomMargin>0</PictureAreaBottomMargin>
               <PictureAreaLeftMargin>0</PictureAreaLeftMargin>
               <PictureAreaRightMargin>0</PictureAreaRightMargin>
@@ -130,14 +130,14 @@
               <TextAreaRightMargin>0</TextAreaRightMargin>
               <TextAreaTopMargin>0</TextAreaTopMargin>
               <TextOrientation>Horizontal</TextOrientation>
-              <Top>202</Top>
+              <Top>280</Top>
               <UseDesignColorSchema>false</UseDesignColorSchema>
               <UseFirstGradient>true</UseFirstGradient>
               <UseSecondGradient>true</UseSecondGradient>
               <UseTwoHandOperation>false</UseTwoHandOperation>
               <VerticalAlignment>Middle</VerticalAlignment>
               <VerticalPictureAlignment>Middle</VerticalPictureAlignment>
-              <Width>96</Width>
+              <Width>130</Width>
             </AttributeList>
             <ObjectList>
               <Hmi.Globalization.MultiLingualFont ID="6" CompositionName="Font">
@@ -167,7 +167,7 @@
                   <MultilingualTextItem ID="B" CompositionName="Items">
                     <AttributeList>
                       <Culture>zh-CN</Culture>
-                      <Text><body><p>Text</p></body></Text>
+                      <Text><body><p>登录</p></body></Text>
                     </AttributeList>
                   </MultilingualTextItem>
                 </ObjectList>
@@ -177,7 +177,101 @@
                   <MultilingualTextItem ID="D" CompositionName="Items">
                     <AttributeList>
                       <Culture>zh-CN</Culture>
-                      <Text><body><p>Text</p></body></Text>
+                      <Text><body><p>登录</p></body></Text>
+                    </AttributeList>
+                  </MultilingualTextItem>
+                </ObjectList>
+              </MultilingualText>
+            </ObjectList>
+          </Hmi.Screen.Button>
+          <Hmi.Screen.Button ID="30" CompositionName="ScreenItems">
+            <AttributeList>
+              <BackColor>226,85,99</BackColor>
+              <BackFillStyle>GradientVertical</BackFillStyle>
+              <BitNumber>0</BitNumber>
+              <BorderBackColor>105, 105, 105</BorderBackColor>
+              <BorderColor>71, 73, 87</BorderColor>
+              <BorderWidth>2</BorderWidth>
+              <CornerRadius>3</CornerRadius>
+              <CornerStyle>Pointed</CornerStyle>
+              <EdgeStyle>Solid</EdgeStyle>
+              <Enabled>true</Enabled>
+              <FirstGradientColor>131, 132, 142</FirstGradientColor>
+              <FirstGradientOffset>15</FirstGradientOffset>
+              <FitToLargest>false</FitToLargest>
+              <Flashing>None</Flashing>
+              <FocusColor>148, 182, 231</FocusColor>
+              <FocusWidth>2</FocusWidth>
+              <ForeColor>255, 255, 255</ForeColor>
+              <Height>50</Height>
+              <HorizontalAlignment>Center</HorizontalAlignment>
+              <HorizontalPictureAlignment>Center</HorizontalPictureAlignment>
+              <HotKey>0</HotKey>
+              <Left>380</Left>
+              <MiddleGradientColor>99, 101, 113</MiddleGradientColor>
+              <Mode>Text</Mode>
+              <ObjectName>BTN_Logout</ObjectName>
+              <PictureAreaBottomMargin>0</PictureAreaBottomMargin>
+              <PictureAreaLeftMargin>0</PictureAreaLeftMargin>
+              <PictureAreaRightMargin>0</PictureAreaRightMargin>
+              <PictureAreaTopMargin>0</PictureAreaTopMargin>
+              <PictureAutoSizing>StretchPicture</PictureAutoSizing>
+              <SecondGradientColor>88, 90, 103</SecondGradientColor>
+              <SecondGradientOffset>15</SecondGradientOffset>
+              <TabIndex>1</TabIndex>
+              <TextAreaBottomMargin>0</TextAreaBottomMargin>
+              <TextAreaLeftMargin>0</TextAreaLeftMargin>
+              <TextAreaRightMargin>0</TextAreaRightMargin>
+              <TextAreaTopMargin>0</TextAreaTopMargin>
+              <TextOrientation>Horizontal</TextOrientation>
+              <Top>280</Top>
+              <UseDesignColorSchema>false</UseDesignColorSchema>
+              <UseFirstGradient>true</UseFirstGradient>
+              <UseSecondGradient>true</UseSecondGradient>
+              <UseTwoHandOperation>false</UseTwoHandOperation>
+              <VerticalAlignment>Middle</VerticalAlignment>
+              <VerticalPictureAlignment>Middle</VerticalPictureAlignment>
+              <Width>130</Width>
+            </AttributeList>
+            <ObjectList>
+              <Hmi.Globalization.MultiLingualFont ID="31" CompositionName="Font">
+                <ObjectList>
+                  <Hmi.Globalization.FontItem ID="32" CompositionName="Items">
+                    <AttributeList>
+                      <Culture>zh-CN</Culture>
+                      <FontFamily>宋体</FontFamily>
+                      <FontSize>16</FontSize>
+                      <FontStyle>Bold</FontStyle>
+                    </AttributeList>
+                  </Hmi.Globalization.FontItem>
+                </ObjectList>
+              </Hmi.Globalization.MultiLingualFont>
+              <MultilingualText ID="33" CompositionName="HelpText">
+                <ObjectList>
+                  <MultilingualTextItem ID="34" CompositionName="Items">
+                    <AttributeList>
+                      <Culture>zh-CN</Culture>
+                      <Text />
+                    </AttributeList>
+                  </MultilingualTextItem>
+                </ObjectList>
+              </MultilingualText>
+              <MultilingualText ID="35" CompositionName="TextOff">
+                <ObjectList>
+                  <MultilingualTextItem ID="36" CompositionName="Items">
+                    <AttributeList>
+                      <Culture>zh-CN</Culture>
+                      <Text><body><p>退出</p></body></Text>
+                    </AttributeList>
+                  </MultilingualTextItem>
+                </ObjectList>
+              </MultilingualText>
+              <MultilingualText ID="37" CompositionName="TextOn">
+                <ObjectList>
+                  <MultilingualTextItem ID="38" CompositionName="Items">
+                    <AttributeList>
+                      <Culture>zh-CN</Culture>
+                      <Text><body><p>退出</p></body></Text>
                     </AttributeList>
                   </MultilingualTextItem>
                 </ObjectList>
@@ -203,25 +297,25 @@
               <Flashing>None</Flashing>
               <ForeColor>49, 52, 74</ForeColor>
               <FormatPattern>9999999</FormatPattern>
-              <Height>32</Height>
+              <Height>40</Height>
               <HiddenInput>false</HiddenInput>
               <HorizontalAlignment>Left</HorizontalAlignment>
-              <Left>209</Left>
+              <Left>270</Left>
               <LeftMargin>3</LeftMargin>
               <Mode>InOutput</Mode>
-              <ObjectName>I/O 域_1</ObjectName>
+              <ObjectName>IO_Username</ObjectName>
               <RightMargin>2</RightMargin>
               <ShiftDecimalPoint>0</ShiftDecimalPoint>
               <ShowLeadingZeros>false</ShowLeadingZeros>
               <TabIndex>2</TabIndex>
               <TextOrientation>Horizontal</TextOrientation>
-              <Top>88</Top>
+              <Top>120</Top>
               <TopMargin>2</TopMargin>
               <Unit />
               <UseDesignColorSchema>false</UseDesignColorSchema>
               <UseTwoHandOperation>false</UseTwoHandOperation>
               <VerticalAlignment>Middle</VerticalAlignment>
-              <Width>96</Width>
+              <Width>220</Width>
             </AttributeList>
             <ObjectList>
               <Hmi.Globalization.MultiLingualFont ID="F" CompositionName="Font">
@@ -239,6 +333,70 @@
               <MultilingualText ID="11" CompositionName="HelpText">
                 <ObjectList>
                   <MultilingualTextItem ID="12" CompositionName="Items">
+                    <AttributeList>
+                      <Culture>zh-CN</Culture>
+                      <Text />
+                    </AttributeList>
+                  </MultilingualTextItem>
+                </ObjectList>
+              </MultilingualText>
+            </ObjectList>
+          </Hmi.Screen.IOField>
+          <Hmi.Screen.IOField ID="2B" CompositionName="ScreenItems">
+            <AttributeList>
+              <AboveUpperLimitColor>237, 88, 97</AboveUpperLimitColor>
+              <BackColor>255, 255, 255</BackColor>
+              <BackFillStyle>Solid</BackFillStyle>
+              <BelowLowerLimitColor>241, 161, 44</BelowLowerLimitColor>
+              <BorderBackColor>101, 103, 115</BorderBackColor>
+              <BorderColor>71, 73, 87</BorderColor>
+              <BorderWidth>4</BorderWidth>
+              <BottomMargin>2</BottomMargin>
+              <CornerRadius>3</CornerRadius>
+              <DataFormat>Decimal</DataFormat>
+              <EdgeStyle>Double</EdgeStyle>
+              <Enabled>true</Enabled>
+              <FieldLength>10</FieldLength>
+              <FitToLargest>false</FitToLargest>
+              <Flashing>None</Flashing>
+              <ForeColor>49, 52, 74</ForeColor>
+              <FormatPattern>9999999</FormatPattern>
+              <Height>40</Height>
+              <HiddenInput>false</HiddenInput>
+              <HorizontalAlignment>Left</HorizontalAlignment>
+              <Left>270</Left>
+              <LeftMargin>3</LeftMargin>
+              <Mode>InOutput</Mode>
+              <ObjectName>IO_Password</ObjectName>
+              <RightMargin>2</RightMargin>
+              <ShiftDecimalPoint>0</ShiftDecimalPoint>
+              <ShowLeadingZeros>false</ShowLeadingZeros>
+              <TabIndex>2</TabIndex>
+              <TextOrientation>Horizontal</TextOrientation>
+              <Top>190</Top>
+              <TopMargin>2</TopMargin>
+              <Unit />
+              <UseDesignColorSchema>false</UseDesignColorSchema>
+              <UseTwoHandOperation>false</UseTwoHandOperation>
+              <VerticalAlignment>Middle</VerticalAlignment>
+              <Width>220</Width>
+            </AttributeList>
+            <ObjectList>
+              <Hmi.Globalization.MultiLingualFont ID="2C" CompositionName="Font">
+                <ObjectList>
+                  <Hmi.Globalization.FontItem ID="2D" CompositionName="Items">
+                    <AttributeList>
+                      <Culture>zh-CN</Culture>
+                      <FontFamily>宋体</FontFamily>
+                      <FontSize>16</FontSize>
+                      <FontStyle>Bold</FontStyle>
+                    </AttributeList>
+                  </Hmi.Globalization.FontItem>
+                </ObjectList>
+              </Hmi.Globalization.MultiLingualFont>
+              <MultilingualText ID="2E" CompositionName="HelpText">
+                <ObjectList>
+                  <MultilingualTextItem ID="2F" CompositionName="Items">
                     <AttributeList>
                       <Culture>zh-CN</Culture>
                       <Text />
@@ -345,20 +503,20 @@
               <EdgeStyle>Double</EdgeStyle>
               <FitToLargest>true</FitToLargest>
               <Flashing>None</Flashing>
-              <ForeColor>49, 52, 74</ForeColor>
-              <Height>20</Height>
+              <ForeColor>230,237,243</ForeColor>
+              <Height>44</Height>
               <HorizontalAlignment>Left</HorizontalAlignment>
-              <Left>516</Left>
+              <Left>200</Left>
               <LeftMargin>3</LeftMargin>
-              <ObjectName>文本域_1</ObjectName>
+              <ObjectName>TXT_Title</ObjectName>
               <RightMargin>2</RightMargin>
               <TabIndex>-1</TabIndex>
               <TextOrientation>Horizontal</TextOrientation>
-              <Top>73</Top>
+              <Top>30</Top>
               <TopMargin>2</TopMargin>
               <UseDesignColorSchema>false</UseDesignColorSchema>
               <VerticalAlignment>Middle</VerticalAlignment>
-              <Width>41</Width>
+              <Width>400</Width>
             </AttributeList>
             <ObjectList>
               <Hmi.Globalization.MultiLingualFont ID="1D" CompositionName="Font">
@@ -378,7 +536,163 @@
                   <MultilingualTextItem ID="20" CompositionName="Items">
                     <AttributeList>
                       <Culture>zh-CN</Culture>
-                      <Text><body><p>Text</p></body></Text>
+                      <Text><body><p>操作员登录</p></body></Text>
+                    </AttributeList>
+                  </MultilingualTextItem>
+                </ObjectList>
+              </MultilingualText>
+            </ObjectList>
+          </Hmi.Screen.TextField>
+        <Hmi.Screen.TextField ID="39" CompositionName="ScreenItems">
+            <AttributeList>
+              <BackColor>255, 255, 255</BackColor>
+              <BackFillStyle>Transparent</BackFillStyle>
+              <BorderBackColor>101, 103, 115</BorderBackColor>
+              <BorderColor>71, 73, 87</BorderColor>
+              <BorderWidth>0</BorderWidth>
+              <BottomMargin>2</BottomMargin>
+              <CornerRadius>3</CornerRadius>
+              <EdgeStyle>Double</EdgeStyle>
+              <FitToLargest>true</FitToLargest>
+              <Flashing>None</Flashing>
+              <ForeColor>230,237,243</ForeColor>
+              <Height>36</Height>
+              <HorizontalAlignment>Left</HorizontalAlignment>
+              <Left>290</Left>
+              <LeftMargin>3</LeftMargin>
+              <ObjectName>TXT_OnlineLabel</ObjectName>
+              <RightMargin>2</RightMargin>
+              <TabIndex>-1</TabIndex>
+              <TextOrientation>Horizontal</TextOrientation>
+              <Top>368</Top>
+              <TopMargin>2</TopMargin>
+              <UseDesignColorSchema>false</UseDesignColorSchema>
+              <VerticalAlignment>Middle</VerticalAlignment>
+              <Width>150</Width>
+            </AttributeList>
+            <ObjectList>
+              <Hmi.Globalization.MultiLingualFont ID="3A" CompositionName="Font">
+                <ObjectList>
+                  <Hmi.Globalization.FontItem ID="3B" CompositionName="Items">
+                    <AttributeList>
+                      <Culture>zh-CN</Culture>
+                      <FontFamily>宋体</FontFamily>
+                      <FontSize>16</FontSize>
+                      <FontStyle>Bold</FontStyle>
+                    </AttributeList>
+                  </Hmi.Globalization.FontItem>
+                </ObjectList>
+              </Hmi.Globalization.MultiLingualFont>
+              <MultilingualText ID="3C" CompositionName="Text">
+                <ObjectList>
+                  <MultilingualTextItem ID="3D" CompositionName="Items">
+                    <AttributeList>
+                      <Culture>zh-CN</Culture>
+                      <Text><body><p>在线状态</p></body></Text>
+                    </AttributeList>
+                  </MultilingualTextItem>
+                </ObjectList>
+              </MultilingualText>
+            </ObjectList>
+          </Hmi.Screen.TextField>
+        <Hmi.Screen.TextField ID="26" CompositionName="ScreenItems">
+            <AttributeList>
+              <BackColor>255, 255, 255</BackColor>
+              <BackFillStyle>Transparent</BackFillStyle>
+              <BorderBackColor>101, 103, 115</BorderBackColor>
+              <BorderColor>71, 73, 87</BorderColor>
+              <BorderWidth>0</BorderWidth>
+              <BottomMargin>2</BottomMargin>
+              <CornerRadius>3</CornerRadius>
+              <EdgeStyle>Double</EdgeStyle>
+              <FitToLargest>true</FitToLargest>
+              <Flashing>None</Flashing>
+              <ForeColor>230,237,243</ForeColor>
+              <Height>36</Height>
+              <HorizontalAlignment>Left</HorizontalAlignment>
+              <Left>160</Left>
+              <LeftMargin>3</LeftMargin>
+              <ObjectName>TXT_PasswordLabel</ObjectName>
+              <RightMargin>2</RightMargin>
+              <TabIndex>-1</TabIndex>
+              <TextOrientation>Horizontal</TextOrientation>
+              <Top>190</Top>
+              <TopMargin>2</TopMargin>
+              <UseDesignColorSchema>false</UseDesignColorSchema>
+              <VerticalAlignment>Middle</VerticalAlignment>
+              <Width>90</Width>
+            </AttributeList>
+            <ObjectList>
+              <Hmi.Globalization.MultiLingualFont ID="27" CompositionName="Font">
+                <ObjectList>
+                  <Hmi.Globalization.FontItem ID="28" CompositionName="Items">
+                    <AttributeList>
+                      <Culture>zh-CN</Culture>
+                      <FontFamily>宋体</FontFamily>
+                      <FontSize>16</FontSize>
+                      <FontStyle>Bold</FontStyle>
+                    </AttributeList>
+                  </Hmi.Globalization.FontItem>
+                </ObjectList>
+              </Hmi.Globalization.MultiLingualFont>
+              <MultilingualText ID="29" CompositionName="Text">
+                <ObjectList>
+                  <MultilingualTextItem ID="2A" CompositionName="Items">
+                    <AttributeList>
+                      <Culture>zh-CN</Culture>
+                      <Text><body><p>密码</p></body></Text>
+                    </AttributeList>
+                  </MultilingualTextItem>
+                </ObjectList>
+              </MultilingualText>
+            </ObjectList>
+          </Hmi.Screen.TextField>
+        <Hmi.Screen.TextField ID="21" CompositionName="ScreenItems">
+            <AttributeList>
+              <BackColor>255, 255, 255</BackColor>
+              <BackFillStyle>Transparent</BackFillStyle>
+              <BorderBackColor>101, 103, 115</BorderBackColor>
+              <BorderColor>71, 73, 87</BorderColor>
+              <BorderWidth>0</BorderWidth>
+              <BottomMargin>2</BottomMargin>
+              <CornerRadius>3</CornerRadius>
+              <EdgeStyle>Double</EdgeStyle>
+              <FitToLargest>true</FitToLargest>
+              <Flashing>None</Flashing>
+              <ForeColor>230,237,243</ForeColor>
+              <Height>36</Height>
+              <HorizontalAlignment>Left</HorizontalAlignment>
+              <Left>160</Left>
+              <LeftMargin>3</LeftMargin>
+              <ObjectName>TXT_UserLabel</ObjectName>
+              <RightMargin>2</RightMargin>
+              <TabIndex>-1</TabIndex>
+              <TextOrientation>Horizontal</TextOrientation>
+              <Top>120</Top>
+              <TopMargin>2</TopMargin>
+              <UseDesignColorSchema>false</UseDesignColorSchema>
+              <VerticalAlignment>Middle</VerticalAlignment>
+              <Width>90</Width>
+            </AttributeList>
+            <ObjectList>
+              <Hmi.Globalization.MultiLingualFont ID="22" CompositionName="Font">
+                <ObjectList>
+                  <Hmi.Globalization.FontItem ID="23" CompositionName="Items">
+                    <AttributeList>
+                      <Culture>zh-CN</Culture>
+                      <FontFamily>宋体</FontFamily>
+                      <FontSize>16</FontSize>
+                      <FontStyle>Bold</FontStyle>
+                    </AttributeList>
+                  </Hmi.Globalization.FontItem>
+                </ObjectList>
+              </Hmi.Globalization.MultiLingualFont>
+              <MultilingualText ID="24" CompositionName="Text">
+                <ObjectList>
+                  <MultilingualTextItem ID="25" CompositionName="Items">
+                    <AttributeList>
+                      <Culture>zh-CN</Culture>
+                      <Text><body><p>用户名</p></body></Text>
                     </AttributeList>
                   </MultilingualTextItem>
                 </ObjectList>

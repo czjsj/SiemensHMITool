@@ -136,6 +136,7 @@ def _symbolic_io_field_lines(o: dict) -> list:
 def _button_lines(o: dict) -> list:
     sid = str(uuid.uuid4())
     text_id = str(uuid.uuid4())
+    tag_mode = o.get("tag_mode", "momentary")
     lines = [
         f'<ScreenItem ID="{sid}" Name="{xml_escape(o["id"])}" Type="Button">',
         *_ind("", _geo_lines(o["x"], o["y"], o.get("width", 120), o.get("height", 50))),
@@ -148,21 +149,41 @@ def _button_lines(o: dict) -> list:
                        text=_color_to_argb(o.get("background_color", "#2BB673")))),
         "</Properties>",
     ]
-    # 事件
-    event_keys = [("Press", "press_script"), ("Release", "release_script"),
-                  ("Click", "click_script")]
-    has_events = any(o.get(k) for _, k in event_keys)
-    if has_events:
-        lines.append("<Events>")
-        for ev_name, key in event_keys:
-            sc = o.get(key)
-            if sc:
-                lines.extend(_ind("", [
-                    f"<Event Name=\"{ev_name}\">",
-                    _ind("", _elem("VBSFunction", text=sc)),
-                    "</Event>",
-                ]))
-        lines.append("</Events>")
+    # process_tag 连接（按钮现在也支持变量绑定）
+    pt = o.get("process_tag", "").strip()
+    if pt:
+        lines.append("<Connection>")
+        lines.extend(_ind("", _elem("ProcessTag", text=pt)))
+        lines.append("</Connection>")
+
+    # 事件（按 tag_mode 区分）
+    if tag_mode == "toggle":
+        # 自保持按钮：只需要 click_script
+        sc = o.get("click_script")
+        if sc:
+            lines.append("<Events>")
+            lines.extend(_ind("", [
+                f"<Event Name=\"Click\">",
+                _ind("", _elem("VBSFunction", text=sc)),
+                "</Event>",
+            ]))
+            lines.append("</Events>")
+    else:
+        # 瞬时按钮：press_script + release_script（也支持 click_script）
+        event_keys = [("Press", "press_script"), ("Release", "release_script"),
+                      ("Click", "click_script")]
+        has_events = any(o.get(k) for _, k in event_keys)
+        if has_events:
+            lines.append("<Events>")
+            for ev_name, key in event_keys:
+                sc = o.get(key)
+                if sc:
+                    lines.extend(_ind("", [
+                        f"<Event Name=\"{ev_name}\">",
+                        _ind("", _elem("VBSFunction", text=sc)),
+                        "</Event>",
+                    ]))
+            lines.append("</Events>")
     lines.append("</ScreenItem>")
     return lines
 
@@ -192,8 +213,9 @@ def _indicator_lines(o: dict) -> list:
         _ind("", "</ColorAnimation>"),
     ]
     if o.get("blink"):
+        blink_tag = xml_escape(o.get("blink_tag") or o["process_tag"])
         lines.extend(_ind("", [
-            f'<FlashAnimation Tag="{xml_escape(o["process_tag"])}">',
+            f'<FlashAnimation Tag="{blink_tag}">',
             _ind("", _elem("Range", attrs={"Value": "1", "Flashing": "Yes"})),
             "</FlashAnimation>",
         ]))

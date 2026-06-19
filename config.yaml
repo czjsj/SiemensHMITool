@@ -21,7 +21,7 @@ openness:
   dll_path: C:\Program Files\Siemens\Automation\Portal V16\PublicAPI\V16\Siemens.Engineering.dll
   attach_running: true
   project_path: ''
-  hmi_device: HMI_2
+  hmi_device: HMI_1
   screen_folder: ''
   target_resolution: ''
   auto_scale_screen_items: true
@@ -31,7 +31,7 @@ openness:
   classic_template:
     enabled: true
     template_screen_name: 画面_1
-    template_xml_path: C:\Users\DL\Desktop\SiemensHmi_Assistant\SiemensHmi_Assistant\exports/templates\画面_1_template.xml
+    template_xml_path: C:\Users\sunny\Desktop\SiemensHmi_Assistant_V2.3\SiemensHmi_Assistant_V2.3\SiemensHmi_Assistant\exports/templates\画面_1_template.xml
     template_export_dir: exports/templates
     generated_xml_dir: exports/generated_from_template
     import_option: Override
@@ -40,16 +40,29 @@ openness:
     update_existing_screen: true
     clear_existing_items: true
     unsupported_object_policy: warn
+  default_templates:
+    basic:
+      enabled: false
+      template_screen_name: ''
+      template_xml_path: ''
+    comfort:
+      enabled: false
+      template_screen_name: ''
+      template_xml_path: ''
+    unified:
+      enabled: false
+      template_screen_name: ''
+      template_xml_path: ''
 hmi_defaults:
   resolution: 800x480
-  hmi_type: Comfort
-  background_color: '#1F2630'
+  hmi_type: Basic
+  background_color: '#D9DEE5'
   font_family: Arial
 output:
   export_dir: exports
   encoding: utf-8-sig
   reference_xml: "\uFEFF<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Document>\n \
-    \ <Engineering version=\"V16\" />\n  <DocumentInfo>\n    <Created>2026-06-18T10:26:43.3694155Z</Created>\n\
+    \ <Engineering version=\"V16\" />\n  <DocumentInfo>\n    <Created>2026-06-18T16:21:46.7271947Z</Created>\n\
     \    <ExportSetting>WithDefaults</ExportSetting>\n    <InstalledProducts>\n  \
     \    <Product>\n        <DisplayName>Totally Integrated Automation Portal</DisplayName>\n\
     \        <DisplayVersion>V16 Update 8</DisplayVersion>\n      </Product>\n   \
@@ -57,14 +70,20 @@ output:
     \        <DisplayVersion>V16 Update 8</DisplayVersion>\n      </OptionPackage>\n\
     \      <OptionPackage>\n        <DisplayName>TIA Portal Openness</DisplayName>\n\
     \        <DisplayVersion>V16 Update 8</DisplayVersion>\n      </OptionPackage>\n\
-    \      <Product>\n        <DisplayName>STEP 7 Professional</DisplayName>\n   \
-    \     <DisplayVersion>V16 Update 8</DisplayVersion>\n      </Product>\n      <OptionPackage>\n\
-    \        <DisplayName>STEP 7 Safety</DisplayName>\n        <DisplayVersion>V16\
-    \ Update 7</DisplayVersion>\n      </OptionPackage>\n      <Product>\n       \
-    \ <DisplayName>WinCC Professional</DisplayName>\n        <DisplayVersion>V16 Update\
-    \ 8</DisplayVersion>\n      </Product>\n    </InstalledProducts>\n  </DocumentInfo>\n\
+    \      <Product>\n        <DisplayName>SINAMICS Startdrive Advanced</DisplayName>\n\
+    \        <DisplayVersion>V16</DisplayVersion>\n      </Product>\n      <OptionPackage>\n\
+    \        <DisplayName>SINAMICS Startdrive G130, G150, S120, S150, SINAMICS MV,\
+    \ S210</DisplayName>\n        <DisplayVersion>V16</DisplayVersion>\n      </OptionPackage>\n\
+    \      <OptionPackage>\n        <DisplayName>SINAMICS Startdrive G110M, G120,\
+    \ G120C, G120D, G120P</DisplayName>\n        <DisplayVersion>V16</DisplayVersion>\n\
+    \      </OptionPackage>\n      <Product>\n        <DisplayName>STEP 7 Professional</DisplayName>\n\
+    \        <DisplayVersion>V16 Update 8</DisplayVersion>\n      </Product>\n   \
+    \   <OptionPackage>\n        <DisplayName>STEP 7 Safety</DisplayName>\n      \
+    \  <DisplayVersion>V16 Update 7</DisplayVersion>\n      </OptionPackage>\n   \
+    \   <Product>\n        <DisplayName>WinCC Advanced</DisplayName>\n        <DisplayVersion>V16\
+    \ Update 8</DisplayVersion>\n      </Product>\n    </InstalledProducts>\n  </DocumentInfo>\n\
     \  <Hmi.Screen.Screen ID=\"0\">\n    <AttributeList>\n      <ActiveLayer>0</ActiveLayer>\n\
-    \      <BackColor>182, 182, 182</BackColor>\n      <GridColor>0, 0, 0</GridColor>\n\
+    \      <BackColor>109, 109, 109</BackColor>\n      <GridColor>0, 0, 0</GridColor>\n\
     \      <Height>480</Height>\n      <Name>画面_1</Name>\n      <Number>1</Number>\n\
     \      <Visible>true</Visible>\n      <Width>800</Width>\n    </AttributeList>\n\
     \    <ObjectList>\n      <MultilingualText ID=\"1\" CompositionName=\"HelpText\"\
@@ -74,42 +93,16 @@ output:
     \        </ObjectList>\n      </MultilingualText>\n      <Hmi.Screen.ScreenLayer\
     \ ID=\"3\" CompositionName=\"Layers\">\n        <AttributeList>\n          <Index>0</Index>\n\
     \          <Name />\n          <VisibleES>true</VisibleES>\n        </AttributeList>\n\
-    \        <ObjectList>\n          <Hmi.Screen.IOField ID=\"4\" CompositionName=\"\
-    ScreenItems\">\n            <AttributeList>\n              <AboveUpperLimitColor>237,\
-    \ 88, 97</AboveUpperLimitColor>\n              <BackColor>255, 255, 255</BackColor>\n\
-    \              <BackFillStyle>Solid</BackFillStyle>\n              <BelowLowerLimitColor>241,\
-    \ 161, 44</BelowLowerLimitColor>\n              <BorderBackColor>101, 103, 115</BorderBackColor>\n\
-    \              <BorderColor>71, 73, 87</BorderColor>\n              <BorderWidth>4</BorderWidth>\n\
-    \              <BottomMargin>2</BottomMargin>\n              <CornerRadius>3</CornerRadius>\n\
-    \              <DataFormat>Decimal</DataFormat>\n              <EdgeStyle>Double</EdgeStyle>\n\
-    \              <Enabled>true</Enabled>\n              <FieldLength>10</FieldLength>\n\
-    \              <FitToLargest>false</FitToLargest>\n              <Flashing>None</Flashing>\n\
-    \              <ForeColor>49, 52, 74</ForeColor>\n              <FormatPattern>9999999</FormatPattern>\n\
-    \              <Height>32</Height>\n              <HiddenInput>false</HiddenInput>\n\
-    \              <HorizontalAlignment>Left</HorizontalAlignment>\n             \
-    \ <Left>399</Left>\n              <LeftMargin>3</LeftMargin>\n              <Mode>InOutput</Mode>\n\
-    \              <ObjectName>I/O 域_1</ObjectName>\n              <RightMargin>2</RightMargin>\n\
-    \              <ShiftDecimalPoint>0</ShiftDecimalPoint>\n              <ShowLeadingZeros>false</ShowLeadingZeros>\n\
-    \              <TabIndex>1</TabIndex>\n              <TextOrientation>Horizontal</TextOrientation>\n\
-    \              <Top>149</Top>\n              <TopMargin>2</TopMargin>\n      \
-    \        <Unit />\n              <UseDesignColorSchema>false</UseDesignColorSchema>\n\
-    \              <UseTwoHandOperation>false</UseTwoHandOperation>\n            \
-    \  <VerticalAlignment>Middle</VerticalAlignment>\n              <Width>96</Width>\n\
-    \            </AttributeList>\n            <ObjectList>\n              <Hmi.Globalization.MultiLingualFont\
-    \ ID=\"5\" CompositionName=\"Font\">\n                <ObjectList>\n         \
-    \         <Hmi.Globalization.FontItem ID=\"6\" CompositionName=\"Items\">\n  \
-    \                  <AttributeList>\n                      <Culture>zh-CN</Culture>\n\
-    \                      <FontFamily>宋体</FontFamily>\n                      <FontSize>16</FontSize>\n\
-    \                      <FontStyle>Bold</FontStyle>\n                    </AttributeList>\n\
-    \                  </Hmi.Globalization.FontItem>\n                </ObjectList>\n\
-    \              </Hmi.Globalization.MultiLingualFont>\n              <MultilingualText\
-    \ ID=\"7\" CompositionName=\"HelpText\">\n                <ObjectList>\n     \
-    \             <MultilingualTextItem ID=\"8\" CompositionName=\"Items\">\n    \
-    \                <AttributeList>\n                      <Culture>zh-CN</Culture>\n\
-    \                      <Text />\n                    </AttributeList>\n      \
-    \            </MultilingualTextItem>\n                </ObjectList>\n        \
-    \      </MultilingualText>\n            </ObjectList>\n          </Hmi.Screen.IOField>\n\
-    \          <Hmi.Screen.Button ID=\"9\" CompositionName=\"ScreenItems\">\n    \
+    \        <ObjectList>\n          <Hmi.Screen.Circle ID=\"4\" CompositionName=\"\
+    ScreenItems\">\n            <AttributeList>\n              <BackColor>217, 217,\
+    \ 217</BackColor>\n              <BackFillStyle>Solid</BackFillStyle>\n      \
+    \        <BorderColor>24, 28, 49</BorderColor>\n              <BorderWidth>1</BorderWidth>\n\
+    \              <EdgeStyle>Solid</EdgeStyle>\n              <Flashing>None</Flashing>\n\
+    \              <Height>48</Height>\n              <Left>446</Left>\n         \
+    \     <ObjectName>圆_1</ObjectName>\n              <Radius>24</Radius>\n      \
+    \        <TabIndex>-1</TabIndex>\n              <Top>91</Top>\n              <UseDesignColorSchema>false</UseDesignColorSchema>\n\
+    \              <Width>48</Width>\n            </AttributeList>\n          </Hmi.Screen.Circle>\n\
+    \          <Hmi.Screen.Button ID=\"5\" CompositionName=\"ScreenItems\">\n    \
     \        <AttributeList>\n              <BackColor>99, 101, 113</BackColor>\n\
     \              <BackFillStyle>GradientVertical</BackFillStyle>\n             \
     \ <BitNumber>0</BitNumber>\n              <BorderBackColor>105, 105, 105</BorderBackColor>\n\
@@ -122,52 +115,86 @@ output:
     \ 231</FocusColor>\n              <FocusWidth>2</FocusWidth>\n              <ForeColor>255,\
     \ 255, 255</ForeColor>\n              <Height>32</Height>\n              <HorizontalAlignment>Center</HorizontalAlignment>\n\
     \              <HorizontalPictureAlignment>Center</HorizontalPictureAlignment>\n\
-    \              <HotKey>0</HotKey>\n              <Left>572</Left>\n          \
+    \              <HotKey>0</HotKey>\n              <Left>328</Left>\n          \
     \    <MiddleGradientColor>99, 101, 113</MiddleGradientColor>\n              <Mode>Text</Mode>\n\
     \              <ObjectName>按钮_1</ObjectName>\n              <PictureAreaBottomMargin>0</PictureAreaBottomMargin>\n\
     \              <PictureAreaLeftMargin>0</PictureAreaLeftMargin>\n            \
     \  <PictureAreaRightMargin>0</PictureAreaRightMargin>\n              <PictureAreaTopMargin>0</PictureAreaTopMargin>\n\
     \              <PictureAutoSizing>StretchPicture</PictureAutoSizing>\n       \
     \       <SecondGradientColor>88, 90, 103</SecondGradientColor>\n             \
-    \ <SecondGradientOffset>15</SecondGradientOffset>\n              <TabIndex>2</TabIndex>\n\
+    \ <SecondGradientOffset>15</SecondGradientOffset>\n              <TabIndex>1</TabIndex>\n\
     \              <TextAreaBottomMargin>0</TextAreaBottomMargin>\n              <TextAreaLeftMargin>0</TextAreaLeftMargin>\n\
     \              <TextAreaRightMargin>0</TextAreaRightMargin>\n              <TextAreaTopMargin>0</TextAreaTopMargin>\n\
-    \              <TextOrientation>Horizontal</TextOrientation>\n              <Top>159</Top>\n\
+    \              <TextOrientation>Horizontal</TextOrientation>\n              <Top>202</Top>\n\
     \              <UseDesignColorSchema>false</UseDesignColorSchema>\n          \
     \    <UseFirstGradient>true</UseFirstGradient>\n              <UseSecondGradient>true</UseSecondGradient>\n\
     \              <UseTwoHandOperation>false</UseTwoHandOperation>\n            \
     \  <VerticalAlignment>Middle</VerticalAlignment>\n              <VerticalPictureAlignment>Middle</VerticalPictureAlignment>\n\
     \              <Width>96</Width>\n            </AttributeList>\n            <ObjectList>\n\
-    \              <Hmi.Globalization.MultiLingualFont ID=\"A\" CompositionName=\"\
+    \              <Hmi.Globalization.MultiLingualFont ID=\"6\" CompositionName=\"\
     Font\">\n                <ObjectList>\n                  <Hmi.Globalization.FontItem\
-    \ ID=\"B\" CompositionName=\"Items\">\n                    <AttributeList>\n \
+    \ ID=\"7\" CompositionName=\"Items\">\n                    <AttributeList>\n \
     \                     <Culture>zh-CN</Culture>\n                      <FontFamily>宋体</FontFamily>\n\
     \                      <FontSize>16</FontSize>\n                      <FontStyle>Bold</FontStyle>\n\
     \                    </AttributeList>\n                  </Hmi.Globalization.FontItem>\n\
     \                </ObjectList>\n              </Hmi.Globalization.MultiLingualFont>\n\
-    \              <MultilingualText ID=\"C\" CompositionName=\"HelpText\">\n    \
-    \            <ObjectList>\n                  <MultilingualTextItem ID=\"D\" CompositionName=\"\
+    \              <MultilingualText ID=\"8\" CompositionName=\"HelpText\">\n    \
+    \            <ObjectList>\n                  <MultilingualTextItem ID=\"9\" CompositionName=\"\
     Items\">\n                    <AttributeList>\n                      <Culture>zh-CN</Culture>\n\
     \                      <Text />\n                    </AttributeList>\n      \
     \            </MultilingualTextItem>\n                </ObjectList>\n        \
-    \      </MultilingualText>\n              <MultilingualText ID=\"E\" CompositionName=\"\
+    \      </MultilingualText>\n              <MultilingualText ID=\"A\" CompositionName=\"\
     TextOff\">\n                <ObjectList>\n                  <MultilingualTextItem\
-    \ ID=\"F\" CompositionName=\"Items\">\n                    <AttributeList>\n \
+    \ ID=\"B\" CompositionName=\"Items\">\n                    <AttributeList>\n \
     \                     <Culture>zh-CN</Culture>\n                      <Text><body><p>Text</p></body></Text>\n\
     \                    </AttributeList>\n                  </MultilingualTextItem>\n\
     \                </ObjectList>\n              </MultilingualText>\n          \
-    \    <MultilingualText ID=\"10\" CompositionName=\"TextOn\">\n               \
-    \ <ObjectList>\n                  <MultilingualTextItem ID=\"11\" CompositionName=\"\
-    Items\">\n                    <AttributeList>\n                      <Culture>zh-CN</Culture>\n\
+    \    <MultilingualText ID=\"C\" CompositionName=\"TextOn\">\n                <ObjectList>\n\
+    \                  <MultilingualTextItem ID=\"D\" CompositionName=\"Items\">\n\
+    \                    <AttributeList>\n                      <Culture>zh-CN</Culture>\n\
     \                      <Text><body><p>Text</p></body></Text>\n               \
     \     </AttributeList>\n                  </MultilingualTextItem>\n          \
     \      </ObjectList>\n              </MultilingualText>\n            </ObjectList>\n\
-    \          </Hmi.Screen.Button>\n          <Hmi.Screen.SymbolicIOField ID=\"12\"\
-    \ CompositionName=\"ScreenItems\">\n            <AttributeList>\n            \
-    \  <AboveUpperLimitColor>237, 88, 97</AboveUpperLimitColor>\n              <BackColor>255,\
-    \ 255, 255</BackColor>\n              <BackFillStyle>Solid</BackFillStyle>\n \
-    \             <BelowLowerLimitColor>241, 161, 44</BelowLowerLimitColor>\n    \
-    \          <BitNumber>0</BitNumber>\n              <BorderBackColor>101, 103,\
+    \          </Hmi.Screen.Button>\n          <Hmi.Screen.IOField ID=\"E\" CompositionName=\"\
+    ScreenItems\">\n            <AttributeList>\n              <AboveUpperLimitColor>237,\
+    \ 88, 97</AboveUpperLimitColor>\n              <BackColor>255, 255, 255</BackColor>\n\
+    \              <BackFillStyle>Solid</BackFillStyle>\n              <BelowLowerLimitColor>241,\
+    \ 161, 44</BelowLowerLimitColor>\n              <BorderBackColor>101, 103, 115</BorderBackColor>\n\
+    \              <BorderColor>71, 73, 87</BorderColor>\n              <BorderWidth>4</BorderWidth>\n\
+    \              <BottomMargin>2</BottomMargin>\n              <CornerRadius>3</CornerRadius>\n\
+    \              <DataFormat>Decimal</DataFormat>\n              <EdgeStyle>Double</EdgeStyle>\n\
+    \              <Enabled>true</Enabled>\n              <FieldLength>10</FieldLength>\n\
+    \              <FitToLargest>false</FitToLargest>\n              <Flashing>None</Flashing>\n\
+    \              <ForeColor>49, 52, 74</ForeColor>\n              <FormatPattern>9999999</FormatPattern>\n\
+    \              <Height>32</Height>\n              <HiddenInput>false</HiddenInput>\n\
+    \              <HorizontalAlignment>Left</HorizontalAlignment>\n             \
+    \ <Left>209</Left>\n              <LeftMargin>3</LeftMargin>\n              <Mode>InOutput</Mode>\n\
+    \              <ObjectName>I/O 域_1</ObjectName>\n              <RightMargin>2</RightMargin>\n\
+    \              <ShiftDecimalPoint>0</ShiftDecimalPoint>\n              <ShowLeadingZeros>false</ShowLeadingZeros>\n\
+    \              <TabIndex>2</TabIndex>\n              <TextOrientation>Horizontal</TextOrientation>\n\
+    \              <Top>88</Top>\n              <TopMargin>2</TopMargin>\n       \
+    \       <Unit />\n              <UseDesignColorSchema>false</UseDesignColorSchema>\n\
+    \              <UseTwoHandOperation>false</UseTwoHandOperation>\n            \
+    \  <VerticalAlignment>Middle</VerticalAlignment>\n              <Width>96</Width>\n\
+    \            </AttributeList>\n            <ObjectList>\n              <Hmi.Globalization.MultiLingualFont\
+    \ ID=\"F\" CompositionName=\"Font\">\n                <ObjectList>\n         \
+    \         <Hmi.Globalization.FontItem ID=\"10\" CompositionName=\"Items\">\n \
+    \                   <AttributeList>\n                      <Culture>zh-CN</Culture>\n\
+    \                      <FontFamily>宋体</FontFamily>\n                      <FontSize>16</FontSize>\n\
+    \                      <FontStyle>Bold</FontStyle>\n                    </AttributeList>\n\
+    \                  </Hmi.Globalization.FontItem>\n                </ObjectList>\n\
+    \              </Hmi.Globalization.MultiLingualFont>\n              <MultilingualText\
+    \ ID=\"11\" CompositionName=\"HelpText\">\n                <ObjectList>\n    \
+    \              <MultilingualTextItem ID=\"12\" CompositionName=\"Items\">\n  \
+    \                  <AttributeList>\n                      <Culture>zh-CN</Culture>\n\
+    \                      <Text />\n                    </AttributeList>\n      \
+    \            </MultilingualTextItem>\n                </ObjectList>\n        \
+    \      </MultilingualText>\n            </ObjectList>\n          </Hmi.Screen.IOField>\n\
+    \          <Hmi.Screen.SymbolicIOField ID=\"13\" CompositionName=\"ScreenItems\"\
+    >\n            <AttributeList>\n              <AboveUpperLimitColor>237, 88, 97</AboveUpperLimitColor>\n\
+    \              <BackColor>255, 255, 255</BackColor>\n              <BackFillStyle>Solid</BackFillStyle>\n\
+    \              <BelowLowerLimitColor>241, 161, 44</BelowLowerLimitColor>\n   \
+    \           <BitNumber>0</BitNumber>\n              <BorderBackColor>101, 103,\
     \ 115</BorderBackColor>\n              <BorderColor>71, 73, 87</BorderColor>\n\
     \              <BorderWidth>4</BorderWidth>\n              <BottomMargin>2</BottomMargin>\n\
     \              <CornerRadius>3</CornerRadius>\n              <CountVisibleItems>3</CountVisibleItems>\n\
@@ -177,63 +204,54 @@ output:
     \              <FlashingOnLimitViolation>false</FlashingOnLimitViolation>\n  \
     \            <ForeColor>49, 52, 74</ForeColor>\n              <Height>32</Height>\n\
     \              <HorizontalAlignment>Left</HorizontalAlignment>\n             \
-    \ <Left>229</Left>\n              <LeftMargin>3</LeftMargin>\n              <Mode>InOutput</Mode>\n\
+    \ <Left>457</Left>\n              <LeftMargin>3</LeftMargin>\n              <Mode>InOutput</Mode>\n\
     \              <ObjectName>符号 I/O 域_1</ObjectName>\n              <OnValue>1</OnValue>\n\
     \              <RightMargin>2</RightMargin>\n              <SelectBackColor>0,\
     \ 0, 0</SelectBackColor>\n              <SelectForeColor>255, 255, 255</SelectForeColor>\n\
     \              <ShowDropDownButton>true</ShowDropDownButton>\n              <ShowDropDownList>true</ShowDropDownList>\n\
     \              <TabIndex>3</TabIndex>\n              <TextOrientation>Horizontal</TextOrientation>\n\
-    \              <Top>82</Top>\n              <TopMargin>2</TopMargin>\n       \
-    \       <UseDesignColorSchema>false</UseDesignColorSchema>\n              <VerticalAlignment>Middle</VerticalAlignment>\n\
-    \              <Width>170</Width>\n            </AttributeList>\n            <ObjectList>\n\
-    \              <Hmi.Globalization.MultiLingualFont ID=\"13\" CompositionName=\"\
+    \              <Top>258</Top>\n              <TopMargin>2</TopMargin>\n      \
+    \        <UseDesignColorSchema>false</UseDesignColorSchema>\n              <VerticalAlignment>Middle</VerticalAlignment>\n\
+    \              <Width>96</Width>\n            </AttributeList>\n            <ObjectList>\n\
+    \              <Hmi.Globalization.MultiLingualFont ID=\"14\" CompositionName=\"\
     Font\">\n                <ObjectList>\n                  <Hmi.Globalization.FontItem\
-    \ ID=\"14\" CompositionName=\"Items\">\n                    <AttributeList>\n\
+    \ ID=\"15\" CompositionName=\"Items\">\n                    <AttributeList>\n\
     \                      <Culture>zh-CN</Culture>\n                      <FontFamily>宋体</FontFamily>\n\
     \                      <FontSize>16</FontSize>\n                      <FontStyle>Bold</FontStyle>\n\
     \                    </AttributeList>\n                  </Hmi.Globalization.FontItem>\n\
     \                </ObjectList>\n              </Hmi.Globalization.MultiLingualFont>\n\
-    \              <MultilingualText ID=\"15\" CompositionName=\"HelpText\">\n   \
-    \             <ObjectList>\n                  <MultilingualTextItem ID=\"16\"\
+    \              <MultilingualText ID=\"16\" CompositionName=\"HelpText\">\n   \
+    \             <ObjectList>\n                  <MultilingualTextItem ID=\"17\"\
     \ CompositionName=\"Items\">\n                    <AttributeList>\n          \
     \            <Culture>zh-CN</Culture>\n                      <Text />\n      \
     \              </AttributeList>\n                  </MultilingualTextItem>\n \
     \               </ObjectList>\n              </MultilingualText>\n           \
-    \   <MultilingualText ID=\"17\" CompositionName=\"TextOff\">\n               \
-    \ <ObjectList>\n                  <MultilingualTextItem ID=\"18\" CompositionName=\"\
+    \   <MultilingualText ID=\"18\" CompositionName=\"TextOff\">\n               \
+    \ <ObjectList>\n                  <MultilingualTextItem ID=\"19\" CompositionName=\"\
     Items\">\n                    <AttributeList>\n                      <Culture>zh-CN</Culture>\n\
     \                      <Text><body><p>0</p></body></Text>\n                  \
     \  </AttributeList>\n                  </MultilingualTextItem>\n             \
     \   </ObjectList>\n              </MultilingualText>\n              <MultilingualText\
-    \ ID=\"19\" CompositionName=\"TextOn\">\n                <ObjectList>\n      \
-    \            <MultilingualTextItem ID=\"1A\" CompositionName=\"Items\">\n    \
+    \ ID=\"1A\" CompositionName=\"TextOn\">\n                <ObjectList>\n      \
+    \            <MultilingualTextItem ID=\"1B\" CompositionName=\"Items\">\n    \
     \                <AttributeList>\n                      <Culture>zh-CN</Culture>\n\
     \                      <Text><body><p>1</p></body></Text>\n                  \
     \  </AttributeList>\n                  </MultilingualTextItem>\n             \
     \   </ObjectList>\n              </MultilingualText>\n            </ObjectList>\n\
-    \          </Hmi.Screen.SymbolicIOField>\n          <Hmi.Screen.Circle ID=\"1B\"\
-    \ CompositionName=\"ScreenItems\">\n            <AttributeList>\n            \
-    \  <BackColor>217, 217, 217</BackColor>\n              <BackFillStyle>Solid</BackFillStyle>\n\
-    \              <BorderColor>24, 28, 49</BorderColor>\n              <BorderWidth>1</BorderWidth>\n\
-    \              <EdgeStyle>Solid</EdgeStyle>\n              <Flashing>None</Flashing>\n\
-    \              <Height>48</Height>\n              <Left>293</Left>\n         \
-    \     <ObjectName>圆_1</ObjectName>\n              <Radius>24</Radius>\n      \
-    \        <TabIndex>-1</TabIndex>\n              <Top>245</Top>\n             \
-    \ <UseDesignColorSchema>false</UseDesignColorSchema>\n              <Width>48</Width>\n\
-    \            </AttributeList>\n          </Hmi.Screen.Circle>\n          <Hmi.Screen.TextField\
-    \ ID=\"1C\" CompositionName=\"ScreenItems\">\n            <AttributeList>\n  \
-    \            <BackColor>255, 255, 255</BackColor>\n              <BackFillStyle>Transparent</BackFillStyle>\n\
+    \          </Hmi.Screen.SymbolicIOField>\n          <Hmi.Screen.TextField ID=\"\
+    1C\" CompositionName=\"ScreenItems\">\n            <AttributeList>\n         \
+    \     <BackColor>255, 255, 255</BackColor>\n              <BackFillStyle>Transparent</BackFillStyle>\n\
     \              <BorderBackColor>101, 103, 115</BorderBackColor>\n            \
     \  <BorderColor>71, 73, 87</BorderColor>\n              <BorderWidth>0</BorderWidth>\n\
     \              <BottomMargin>2</BottomMargin>\n              <CornerRadius>3</CornerRadius>\n\
     \              <EdgeStyle>Double</EdgeStyle>\n              <FitToLargest>true</FitToLargest>\n\
     \              <Flashing>None</Flashing>\n              <ForeColor>49, 52, 74</ForeColor>\n\
     \              <Height>20</Height>\n              <HorizontalAlignment>Left</HorizontalAlignment>\n\
-    \              <Left>188</Left>\n              <LeftMargin>3</LeftMargin>\n  \
+    \              <Left>516</Left>\n              <LeftMargin>3</LeftMargin>\n  \
     \            <ObjectName>文本域_1</ObjectName>\n              <RightMargin>2</RightMargin>\n\
     \              <TabIndex>-1</TabIndex>\n              <TextOrientation>Horizontal</TextOrientation>\n\
-    \              <Top>171</Top>\n              <TopMargin>2</TopMargin>\n      \
-    \        <UseDesignColorSchema>false</UseDesignColorSchema>\n              <VerticalAlignment>Middle</VerticalAlignment>\n\
+    \              <Top>73</Top>\n              <TopMargin>2</TopMargin>\n       \
+    \       <UseDesignColorSchema>false</UseDesignColorSchema>\n              <VerticalAlignment>Middle</VerticalAlignment>\n\
     \              <Width>41</Width>\n            </AttributeList>\n            <ObjectList>\n\
     \              <Hmi.Globalization.MultiLingualFont ID=\"1D\" CompositionName=\"\
     Font\">\n                <ObjectList>\n                  <Hmi.Globalization.FontItem\
@@ -255,9 +273,9 @@ mimo:
   api_key: sk-crtatl6ichwjovl1mnymwylvdjkx2gwkz1y6hpkxt8xcp03k
   base_url: https://api.xiaomimimo.com/v1
   model: mimo-v2.5
-  max_iterations: 3
+  max_iterations: 6
   review_timeout_seconds: 90
-  review_pass_threshold: 70
+  review_pass_threshold: 80
   image_analysis_enabled: true
   image_analysis_max_size: 2048
 server:
