@@ -10,41 +10,41 @@
 
 ## 目录
 
-| 章节 | 内容 |
-|---|---|
-| 0 | Claude Code 必读说明 |
-| 1 | 项目背景与当前问题 |
-| 2 | 项目目标与非目标 |
-| 3 | 关键架构决策 |
-| 4 | 目标总体架构 |
-| 5 | 推荐目录结构 |
-| 6 | HMI IR V2 数据模型 |
-| 7 | 设备能力矩阵 |
-| 8 | 部署计划模型 |
-| 9 | Basic Panel 完整实现方案 |
-| 10 | Comfort Panel 完整实现方案 |
-| 11 | Unified 完整实现方案 |
-| 12 | 黄金参考工程与 XML Fragment Catalog |
-| 13 | Classic XML 核心组件 |
-| 14 | 对现有模块的具体改造 |
-| 15 | API 设计 |
-| 16 | 配置文件升级 |
-| 17 | 错误和诊断模型 |
-| 18 | 事务、回滚与安全 |
-| 19 | 测试策略 |
-| 20 | 验证闭环 |
-| 21 | 分阶段实施计划 |
-| 22 | Claude Code 任务拆分清单 |
-| 23 | 编码规则 |
-| 24 | Definition of Done |
-| 25 | 第一批最小可交付场景 |
-| 26 | 实施时的风险清单 |
-| 27 | 官方能力依据与实现边界 |
-| 28 | 交付物清单 |
-| 29 | Claude Code 开始执行时的建议命令 |
-| 30 | 禁止 Claude Code 采用的捷径 |
-| 31 | 推荐的首个 Claude Code 指令 |
-| 32 | 文档结论 |
+| 章节  | 内容                           |
+| --- | ---------------------------- |
+| 0   | Claude Code 必读说明             |
+| 1   | 项目背景与当前问题                    |
+| 2   | 项目目标与非目标                     |
+| 3   | 关键架构决策                       |
+| 4   | 目标总体架构                       |
+| 5   | 推荐目录结构                       |
+| 6   | HMI IR V2 数据模型               |
+| 7   | 设备能力矩阵                       |
+| 8   | 部署计划模型                       |
+| 9   | Basic Panel 完整实现方案           |
+| 10  | Comfort Panel 完整实现方案         |
+| 11  | Unified 完整实现方案               |
+| 12  | 黄金参考工程与 XML Fragment Catalog |
+| 13  | Classic XML 核心组件             |
+| 14  | 对现有模块的具体改造                   |
+| 15  | API 设计                       |
+| 16  | 配置文件升级                       |
+| 17  | 错误和诊断模型                      |
+| 18  | 事务、回滚与安全                     |
+| 19  | 测试策略                         |
+| 20  | 验证闭环                         |
+| 21  | 分阶段实施计划                      |
+| 22  | Claude Code 任务拆分清单           |
+| 23  | 编码规则                         |
+| 24  | Definition of Done           |
+| 25  | 第一批最小可交付场景                   |
+| 26  | 实施时的风险清单                     |
+| 27  | 官方能力依据与实现边界                  |
+| 28  | 交付物清单                        |
+| 29  | Claude Code 开始执行时的建议命令       |
+| 30  | 禁止 Claude Code 采用的捷径         |
+| 31  | 推荐的首个 Claude Code 指令         |
+| 32  | 文档结论                         |
 
 ---
 
@@ -636,21 +636,21 @@ class ScriptSpec(BaseModel):
 
 示例矩阵：
 
-| 能力 | Basic | Comfort | Unified |
-|---|---:|---:|---:|
-| 画面导入/创建 | 是 | 是 | 是 |
-| HMI 变量表导入/创建 | 是 | 是 | 是 |
-| 外部变量 | 是 | 是 | 是 |
-| 系统 FunctionList | 是 | 是 | 不适用 |
-| VBS | 禁止 | 是 | 否 |
-| JavaScript | 否 | 否 | 是 |
-| 标签动态化 | 受限 | 是 | 是 |
-| 离散颜色动态 | 是，模板验证后 | 是 | 是 |
-| 闪烁动态 | 设备相关 | 是 | 是 |
-| 动态可操作性 | 常有限制 | 是 | 是 |
-| Popup/Slide-in | 通常不支持或受限 | 设备相关 | 是 |
-| Faceplate | 受限 | 是 | 是，模型不同 |
-| 直接强类型创建 ScreenItem | 否 | 否 | 是 |
+| 能力                 | Basic    | Comfort | Unified |
+| ------------------ | --------:| -------:| -------:|
+| 画面导入/创建            | 是        | 是       | 是       |
+| HMI 变量表导入/创建       | 是        | 是       | 是       |
+| 外部变量               | 是        | 是       | 是       |
+| 系统 FunctionList    | 是        | 是       | 不适用     |
+| VBS                | 禁止       | 是       | 否       |
+| JavaScript         | 否        | 否       | 是       |
+| 标签动态化              | 受限       | 是       | 是       |
+| 离散颜色动态             | 是，模板验证后  | 是       | 是       |
+| 闪烁动态               | 设备相关     | 是       | 是       |
+| 动态可操作性             | 常有限制     | 是       | 是       |
+| Popup/Slide-in     | 通常不支持或受限 | 设备相关    | 是       |
+| Faceplate          | 受限       | 是       | 是，模型不同  |
+| 直接强类型创建 ScreenItem | 否        | 否       | 是       |
 
 注意：矩阵不能代替目标设备和目标版本实际验证。
 
@@ -806,17 +806,17 @@ Basic 事件全部映射到 FunctionList 模板。
 
 建议动作映射：
 
-| ActionSpec | Basic 实现 |
-|---|---|
-| set_bit | SetBit 类型系统函数模板 |
-| reset_bit | ResetBit 类型系统函数模板 |
-| toggle_bit | InvertBit 类型系统函数模板 |
-| set_value | SetTag/SetValue 类型系统函数模板 |
-| increment | IncreaseTag 类型模板 |
-| decrement | DecreaseTag 类型模板 |
-| activate_screen | ActivateScreen 类型模板 |
-| call_script | 不支持，报错 |
-| write_expression | 默认不支持，报错 |
+| ActionSpec       | Basic 实现                 |
+| ---------------- | ------------------------ |
+| set_bit          | SetBit 类型系统函数模板          |
+| reset_bit        | ResetBit 类型系统函数模板        |
+| toggle_bit       | InvertBit 类型系统函数模板       |
+| set_value        | SetTag/SetValue 类型系统函数模板 |
+| increment        | IncreaseTag 类型模板         |
+| decrement        | DecreaseTag 类型模板         |
+| activate_screen  | ActivateScreen 类型模板      |
+| call_script      | 不支持，报错                   |
+| write_expression | 默认不支持，报错                 |
 
 实际函数类型名必须从目标版本黄金 XML 中读取。
 
@@ -1127,15 +1127,15 @@ PROPERTY_ALIASES = {
 
 映射：
 
-| BindingSpec | Unified |
-|---|---|
-| direct_tag | TagDynamization |
-| discrete | TagDynamization + mapping/formula，依版本适配 |
-| range | TagDynamization/Expression |
-| flashing | FlashingDynamization |
-| resource_list | ResourceListDynamization |
-| expression | ScriptDynamization 或表达式动态 |
-| script | ScriptDynamization |
+| BindingSpec   | Unified                                 |
+| ------------- | --------------------------------------- |
+| direct_tag    | TagDynamization                         |
+| discrete      | TagDynamization + mapping/formula，依版本适配 |
+| range         | TagDynamization/Expression              |
+| flashing      | FlashingDynamization                    |
+| resource_list | ResourceListDynamization                |
+| expression    | ScriptDynamization 或表达式动态               |
+| script        | ScriptDynamization                      |
 
 接口：
 
@@ -1722,12 +1722,12 @@ VBS 和 JavaScript 均需：
 
 ## 19.5 回归测试矩阵
 
-| 版本 | Basic | Comfort | Unified |
-|---|---|---|---|
-| V16 | 必测 | 必测 | 有限模式 |
-| V18 | 选测 | 必测 | 必测 |
-| V19 | 选测 | 必测 | 必测 |
-| V20 | 必测 | 必测 | 必测 |
+| 版本  | Basic | Comfort | Unified |
+| --- | ----- | ------- | ------- |
+| V16 | 必测    | 必测      | 有限模式    |
+| V18 | 选测    | 必测      | 必测      |
+| V19 | 选测    | 必测      | 必测      |
+| V20 | 必测    | 必测      | 必测      |
 
 实际支持范围由团队拥有的许可证和设备决定。
 

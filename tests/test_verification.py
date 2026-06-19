@@ -67,16 +67,18 @@ class TestVerificationService:
             ])],
         )
         object_query = {
-            "tags": ["Motor_Start"],
-            "screens": ["MainScreen"],
-            "events": [("BTN_Start", "press", 1)],
-            "bindings": [("BTN_Start", "value", "direct_tag")],
+            "tags": [{"name": "Motor_Start", "data_type": "Bool", "connection": ""}],
+            "screens": [{"name": "MainScreen", "items": [
+                {"name": "BTN_Start", "type": "button", "x": 10, "y": 10}
+            ]}],
+            "events": [{"item_id": "BTN_Start", "event": "press", "action_type": "set_bit"}],
+            "bindings": [{"item_id": "BTN_Start", "property": "value", "kind": "direct_tag", "source_tag": "Motor_Start"}],
             "scripts": [],
             "compile": {"errors": 0, "warnings": 0},
         }
-        result = svc.verify_full(spec, object_query)
-        assert isinstance(result, str) or hasattr(result, 'success')
-        assert result.tags.failed == []
+        result = svc.verify_full(spec, object_query, connected=True)
+        assert hasattr(result, 'success')
+        assert result.tags.failed == [], f"Tags failed: {result.tags.failed}"
         assert result.screens.failed == []
 
     def test_verify_full_with_missing_tags(self):
@@ -85,9 +87,9 @@ class TestVerificationService:
             tags=[TagSpec(name="MissingTag", data_type="Bool")],
             screens=[ScreenSpec(name="S1", width=800, height=480)],
         )
-        object_query = {"tags": [], "screens": ["S1"], "events": [], "bindings": [], "scripts": [], "compile": {"errors": 0}}
-        result = svc.verify_full(spec, object_query)
-        assert result.tags.failed == ["MissingTag"]
+        object_query = {"tags": [], "screens": [{"name": "S1", "items": []}], "events": [], "bindings": [], "scripts": [], "compile": {"errors": 0}}
+        result = svc.verify_full(spec, object_query, connected=True)
+        assert result.tags.failed == ["MissingTag (missing)"]
 
 
 class TestCatalogService:

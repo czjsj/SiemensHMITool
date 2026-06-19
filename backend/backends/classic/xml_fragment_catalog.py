@@ -41,6 +41,22 @@ class CatalogManifest:
     def get_fragment_path(self, key: str) -> str | None:
         return self.fragments.get(key)
 
+    @property
+    def verified_import(self) -> bool:
+        return bool(self.source.get("verified_import", False) or self.source.get("verified", False))
+
+    @property
+    def verified_compile(self) -> bool:
+        return bool(self.source.get("verified_compile", False))
+
+    @property
+    def source_project_name(self) -> str:
+        return self.source.get("project_name", "")
+
+    @property
+    def source_export_timestamp(self) -> str:
+        return self.source.get("exported_at", "")
+
     def validate(self) -> list[str]:
         errors = []
         if self.catalog_version < 1:
@@ -51,6 +67,8 @@ class CatalogManifest:
             errors.append("key.family 缺失")
         if not self.fragments:
             errors.append("fragments 为空")
+        if not self.source_project_name:
+            errors.append("source.project_name 缺失")
         return errors
 
 

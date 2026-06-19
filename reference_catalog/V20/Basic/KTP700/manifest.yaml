@@ -7,6 +7,9 @@ key:
 source:
   exported_at: 2026-06-19
   project_name: HMI_Golden_V20_Basic
+  verified: false
+  verified_import: false
+  verified_compile: false
 fragments:
   screens.base_screen: V20/Basic/KTP700/screens/base_screen.xmlfrag
   controls.button: V20/Basic/KTP700/controls/button.xmlfrag

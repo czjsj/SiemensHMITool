@@ -624,6 +624,193 @@ def hmi_runtime_metadata():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+# --------------------------------------------------------------------------
+# V3.0 真实部署入口 — validate / plan / deploy / verify / compile
+# --------------------------------------------------------------------------
+
+@app.route("/api/hmi/validate", methods=["POST"])
+def hmi_validate():
+    """校验 HmiProjectSpec（交叉引用 + 能力检查）。"""
+    try:
+        body = request.get_json(force=True)
+    except Exception:
+        return jsonify({"ok": False, "error": "请求体必须为 JSON"}), 400
+
+    from backend.domain.ir_v2 import HmiProjectSpec
+    from backend.services.deployment_service import DeploymentService
+
+    project_data = body.get("project")
+    mode = body.get("mode", "v2")
+
+    # 支持 legacy IR dict 自动转换
+    if not project_data:
+        return jsonify({"ok": False, "error": "缺少 project 字段"}), 400
+
+    if mode == "legacy" and isinstance(project_data, dict) and "schema_version" not in project_data:
+        from backend.variable_engine import enrich_to_v2
+        from backend.domain.ir_v2 import HmiProjectSpec as PS
+        try:
+            project = enrich_to_v2(project_data)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Legacy IR 转换失败: {e}"}), 400
+    else:
+        try:
+            project = HmiProjectSpec.model_validate(project_data)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"project 校验失败: {e}"}), 400
+
+    svc = DeploymentService()
+    result = svc.validate(project)
+    return jsonify(result)
+
+
+@app.route("/api/hmi/deploy", methods=["POST"])
+def hmi_deploy():
+    """执行 V3 统一部署流水线。
+
+    请求格式:
+        {
+            "project": { "schema_version": "2.0", ... },
+            "mode": "v2",
+            "options": { "dry_run": true, "compile_after_deploy": true },
+            "legacy_ir": null
+        }
+
+    部署顺序（不可跳过）:
+      validate → BackendFactory → build_plan → execute steps → verify → compile
+    """
+    try:
+        body = request.get_json(force=True)
+    except Exception:
+        return jsonify({"ok": False, "error": "请求体必须为 JSON"}), 400
+
+    from backend.domain.ir_v2 import HmiProjectSpec
+    from backend.services.deployment_service import DeploymentService, RuntimeContext
+
+    project_data = body.get("project")
+    mode = body.get("mode", "v2")
+    options = body.get("options", {})
+    legacy_ir = body.get("legacy_ir")
+
+    if not project_data and not legacy_ir:
+        return jsonify({"ok": False, "error": "缺少 project 或 legacy_ir 字段"}), 400
+
+    # ---- IR 解析 ----
+    if legacy_ir and mode != "v2":
+        # 旧 IR 模式：先转换为 V2
+        from backend.variable_engine import enrich_to_v2
+        try:
+            project = enrich_to_v2(legacy_ir)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Legacy IR 转换失败: {e}"}), 400
+    else:
+        if isinstance(project_data, dict) and "schema_version" not in project_data:
+            from backend.variable_engine import enrich_to_v2
+            try:
+                project = enrich_to_v2(project_data)
+            except Exception as e:
+                return jsonify({"ok": False, "error": f"Legacy IR 转换失败: {e}"}), 400
+        else:
+            try:
+                project = HmiProjectSpec.model_validate(project_data)
+            except Exception as e:
+                return jsonify({"ok": False, "error": f"project 校验失败: {e}"}), 400
+
+    # ---- Runtime 上下文 ----
+    connected = False
+    openness_mgr = None
+    try:
+        mgr = get_openness()
+        if getattr(mgr, "_portal", None) is not None:
+            connected = True
+            openness_mgr = mgr
+    except Exception:
+        pass
+
+    dry_run = options.get("dry_run", not connected)
+    ctx = RuntimeContext(connected=connected and not dry_run, openness_manager=openness_mgr)
+
+    svc = DeploymentService(ctx)
+    result = svc.deploy(project)
+    return jsonify(result)
+
+
+@app.route("/api/hmi/verify", methods=["POST"])
+def hmi_verify():
+    """部署后验证: 查询 TIA 对象 + 编译结果验证。"""
+    try:
+        body = request.get_json(force=True)
+    except Exception:
+        return jsonify({"ok": False, "error": "请求体必须为 JSON"}), 400
+
+    from backend.domain.ir_v2 import HmiProjectSpec
+    from backend.services.deployment_service import DeploymentService, RuntimeContext, BackendFactory
+
+    project_data = body.get("project")
+    if not project_data:
+        return jsonify({"ok": False, "error": "缺少 project 字段"}), 400
+
+    try:
+        if isinstance(project_data, dict) and "schema_version" not in project_data:
+            from backend.variable_engine import enrich_to_v2
+            project = enrich_to_v2(project_data)
+        else:
+            project = HmiProjectSpec.model_validate(project_data)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"project 解析失败: {e}"}), 400
+
+    connected = False
+    try:
+        mgr = get_openness()
+        if getattr(mgr, "_portal", None) is not None:
+            connected = True
+    except Exception:
+        pass
+
+    ctx = RuntimeContext(connected=connected, openness_manager=get_openness() if connected else None)
+    backend, _ = BackendFactory.create(project.target)
+
+    verify_result = backend.verify(project, context={"connected": connected})
+    return jsonify({
+        "ok": verify_result.success,
+        "verification": verify_result.model_dump(),
+        "connected": connected,
+    })
+
+
+@app.route("/api/hmi/compile", methods=["POST"])
+def hmi_compile():
+    """触发 HMI 编译（需已连接 TIA）。"""
+    try:
+        body = request.get_json(force=True) if request.content_type and "application/json" in request.content_type else {}
+    except Exception:
+        body = {}
+
+    connected = False
+    try:
+        mgr = get_openness()
+        if getattr(mgr, "_portal", None) is not None:
+            connected = True
+    except Exception:
+        pass
+
+    if not connected:
+        return jsonify({
+            "ok": False,
+            "error": "未连接到 TIA Portal，无法编译。",
+            "compile": {"errors": 0, "warnings": 0, "messages": ["NOT_CONNECTED"]},
+        })
+
+    try:
+        from backend.openness.compiler import HmiCompiler
+        compiler = HmiCompiler()
+        sw = mgr._find_hmi_software()
+        result = compiler.compile(sw)
+        return jsonify({"ok": result["ok"], "compile": result})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e), "compile": {"errors": 1, "messages": [str(e)]}}), 500
+
+
 if __name__ == "__main__":
     cfg = cfgm.load_config()
     server = cfg.get("server", {})

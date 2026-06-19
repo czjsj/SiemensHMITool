@@ -56,7 +56,7 @@ class TestComfortBackend:
         be = ComfortBackend()
         spec = _make_motor_control_spec()
         plan = be.build_plan(spec)
-        result = be.execute(plan)
+        result = be.execute(plan, context={"connected": True})
         assert isinstance(result, DeploymentResult)
         assert result.tags_created > 0
 
