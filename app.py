@@ -29,6 +29,11 @@ from backend.llm_client import LLMClient, extract_json
 from backend.hmi_ir import validate_ir, IRValidationError
 from backend.simaticml_generator import generate_simaticml
 from backend.openness_manager import OpennessManager
+from backend.openness.classic_executor import ClassicOpennessExecutor
+from backend.openness.diagnostics_utils import (
+    describe_dotnet_object,
+    inspect_xml_document,
+)
 from backend.template_xml_generator import generate_from_template_xml
 from backend.pipeline_orchestrator import run_pipeline
 from backend.variable_engine import VariableEngine
@@ -839,6 +844,116 @@ def hmi_compile():
         return jsonify({"ok": result["ok"], "compile": result})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e), "compile": {"errors": 1, "messages": [str(e)]}}), 500
+
+
+# --------------------------------------------------------------------------
+# 调试 API — 最小变量导入闭环探针
+# --------------------------------------------------------------------------
+@app.route("/api/hmi/debug/import-tag", methods=["POST"])
+def debug_import_tag():
+    """独立变量导入探针 — 用于定位 Import 失败根因。
+
+    只执行变量导入，禁止同时导入 Connection/Screen/Script/Compile。
+
+    请求 JSON:
+        {
+            "device_name": "HMI_1",          (可选，用于定位 HMI 设备)
+            "xml_path": "D:\\probe\\ImportProbe.xml",  (必填，真实 TIA 导出 XML)
+            "expected_tag_name": "ImportProbe",        (必填，导入后期望的变量名)
+            "xml_mode": "exact_export"                 (可选，默认 exact_export)
+        }
+
+    响应 JSON:
+        {
+            "success": bool,
+            "target": {...},
+            "default_table": {...},
+            "tag_composition": {...},
+            "xml_info": {...},
+            "before_tags": [],
+            "after_tags": [],
+            "new_tags": [],
+            "imported_tag": {...},
+            "exception_chain": [],
+            "error": "..." (失败时)
+        }
+    """
+    data = request.get_json(force=True, silent=True) or {}
+
+    xml_path = data.get("xml_path", "").strip()
+    expected_tag_name = data.get("expected_tag_name", "").strip()
+    device_name = data.get("device_name", "").strip() or None
+
+    # 参数校验
+    if not xml_path:
+        return jsonify({"success": False, "error": "xml_path 为必填参数"}), 400
+    if not expected_tag_name:
+        return jsonify({"success": False, "error": "expected_tag_name 为必填参数"}), 400
+
+    if not os.path.isfile(xml_path):
+        return jsonify({
+            "success": False,
+            "error": f"XML 文件不存在: {xml_path}",
+            "xml_info": inspect_xml_document(xml_path),
+        }), 400
+
+    # 获取 Openness 连接
+    mgr = get_openness()
+    if getattr(mgr, "_portal", None) is None:
+        return jsonify({
+            "success": False,
+            "error": "TIA Portal 未连接，请先调用 /api/openness/connect",
+        }), 503
+
+    # 创建 executor 并定位 HMI Target
+    executor = ClassicOpennessExecutor()
+    if not executor.is_available:
+        return jsonify({
+            "success": False,
+            "error": "pythonnet/CLR 不可用",
+        }), 503
+
+    hmi_software, device, device_item = executor.locate_hmi_target(
+        mgr._project, expected_device_name=device_name
+    )
+
+    if hmi_software is None:
+        return jsonify({
+            "success": False,
+            "error": "未找到 Classic HMI Target",
+            "device_name_filter": device_name,
+            "xml_info": inspect_xml_document(xml_path),
+        }), 404
+
+    # 外部引用前置检查
+    ref_check = executor.validate_external_tag_references(hmi_software, xml_path)
+    if ref_check.get("status") == "BLOCKED":
+        return jsonify({
+            "success": False,
+            "error": "EXTERNAL_TAG_REFERENCE_UNRESOLVED: 外部引用未解析",
+            "status": "BLOCKED",
+            "references": ref_check.get("references", []),
+            "blocked_reasons": ref_check.get("blocked_reasons", []),
+            "target": describe_dotnet_object(hmi_software),
+            "xml_info": inspect_xml_document(xml_path),
+        }), 422
+
+    # 执行探针导入
+    try:
+        probe_result = executor.import_exact_exported_tag_probe(
+            hmi_software, xml_path, expected_tag_name
+        )
+        return jsonify(probe_result)
+
+    except Exception as exc:
+        from backend.openness.diagnostics_utils import collect_exception_chain
+        return jsonify({
+            "success": False,
+            "error": str(exc),
+            "exception_chain": collect_exception_chain(exc),
+            "target": describe_dotnet_object(hmi_software),
+            "xml_info": inspect_xml_document(xml_path),
+        }), 500
 
 
 if __name__ == "__main__":

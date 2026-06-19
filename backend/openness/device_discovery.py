@@ -7,6 +7,10 @@ from __future__ import annotations
 
 from typing import Any
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class DeviceDiscovery:
     """HMI 设备发现与类型识别。
@@ -65,7 +69,11 @@ class DeviceDiscovery:
                         sw_type = f"{type(sw).__module__}.{type(sw).__name__}"
                         if "Hmi" in sw_type and _target_match(device, item, sw):
                             return sw, device, item
-                except Exception:
+                except Exception as exc:
+                    logger.debug(
+                        "DeviceDiscovery: 跳过设备项 %s: %s",
+                        getattr(item, "Name", "unknown"), exc,
+                    )
                     continue
         return None, None, None
 

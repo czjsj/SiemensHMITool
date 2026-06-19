@@ -44,6 +44,21 @@ from typing import Any
 
 from backend.domain.diagnostics import Diagnostic, DiagnosticCodes
 from backend.domain.enums import DiagnosticSeverity, OpennessOperationKind
+from backend.openness.diagnostics_utils import (
+    collect_exception_chain,
+    describe_dotnet_object,
+    enumerate_tag_names,
+    find_tag,
+    inspect_xml_document,
+)
+
+
+def _safe_device_name(obj) -> str:
+    """安全获取设备/设备项名称。"""
+    try:
+        return str(obj.Name)
+    except Exception:
+        return type(obj).__name__
 
 
 # ------------------------------------------------------------------
@@ -58,6 +73,18 @@ class ClassicTagImportKind(str, Enum):
     """
     TAG_TABLE = "tag_table"
     INDIVIDUAL_TAGS = "individual_tags"
+
+
+class TagXmlKind(str, Enum):
+    """基于真实导出样本的严格 XML 分类。
+
+    EXPORTED_TAG:       单个变量导出 (起始对象 Hmi.Tag.Tag)
+                        → DefaultTagTable.Tags.Import()
+    EXPORTED_TAG_TABLE: 完整变量表导出 (起始对象 Hmi.Tag.TagTable)
+                        → TagFolder.TagTables.Import()
+    """
+    EXPORTED_TAG = "exported_tag"
+    EXPORTED_TAG_TABLE = "exported_tag_table"
 
 
 def detect_tag_import_kind(xml_path: str) -> ClassicTagImportKind:
@@ -138,6 +165,63 @@ def detect_tag_import_kind(xml_path: str) -> ClassicTagImportKind:
         f"根元素='{root_local}'，CompositionName='{composition_name}'，"
         f"文件='{xml_path}'。"
         f"请确认 XML 是完整 TagTable 导出还是单个 Tag 集合。"
+    )
+
+
+def classify_tag_xml_strict(xml_path: str) -> TagXmlKind:
+    """基于 XML Document 根对象类型严格分类变量 XML。
+
+    通过解析 XML 文件，查找具有 'Hmi.Tag.Tag' 或 'Hmi.Tag.TagTable'
+    类型标识的起始对象，进行精确分类。
+
+    不依赖字符串搜索或根标签名猜测。
+    """
+    try:
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+    except Exception as e:
+        raise ValueError(
+            f"TAG_XML_PARSE_FAILED: 无法解析 XML '{xml_path}': {e}"
+        ) from e
+
+    # 查找所有带有类型标识的对象
+    start_objects = []
+    for elem in root.iter():
+        # 检查 ID 属性中的类型名 (如 "Hmi.Tag.Tag" 或 "Hmi.Tag.TagTable")
+        elem_tag_local = _local_tag_name(elem.tag)
+
+        # 方式1: 标签名本身是类型 (如 <Hmi.Tag.Tag ...>)
+        if elem_tag_local.startswith("Hmi.Tag."):
+            start_objects.append(elem_tag_local)
+            continue
+
+        # 方式2: 命名空间标签名
+        if "." in elem_tag_local and "Tag" in elem_tag_local:
+            start_objects.append(elem_tag_local)
+
+    # 去重
+    unique_types = sorted(set(start_objects))
+
+    if not unique_types:
+        # 回退: 使用旧的检测逻辑
+        kind = detect_tag_import_kind(xml_path)
+        if kind == ClassicTagImportKind.TAG_TABLE:
+            return TagXmlKind.EXPORTED_TAG_TABLE
+        return TagXmlKind.EXPORTED_TAG
+
+    # 判断: TagTable 优先（因为 TagTable XML 内部也会包含 Tag 元素）
+    has_tag_table = any("TagTable" in t for t in unique_types)
+    has_tag = any(t.endswith(".Tag") or t == "Hmi.Tag.Tag" for t in unique_types)
+
+    if has_tag_table:
+        return TagXmlKind.EXPORTED_TAG_TABLE
+    if has_tag:
+        return TagXmlKind.EXPORTED_TAG
+
+    raise ValueError(
+        f"TAG_XML_START_OBJECT_UNSUPPORTED: 不支持的变量 XML 起始对象类型: "
+        f"{unique_types}，文件='{xml_path}'。"
+        f"XML 诊断: {inspect_xml_document(xml_path)}"
     )
 
 
@@ -360,6 +444,15 @@ class ClassicOpennessExecutor:
                 severity=DiagnosticSeverity.ERROR,
                 phase="P30_TAG_TABLES_AND_TAGS",
                 message=f"TagTable 导入失败 (kind=tag_table): {e}",
+                details={
+                    "stage": "IMPORT_TAG_TABLE",
+                    "xml_path": xml_path,
+                    "exception_chain": collect_exception_chain(e),
+                    "hmi_target_type": describe_dotnet_object(hmi_software),
+                    "tag_folder_type": describe_dotnet_object(
+                        getattr(hmi_software, "TagFolder", None)
+                    ),
+                },
             ))
 
         return result
@@ -391,14 +484,32 @@ class ClassicOpennessExecutor:
                     "DEFAULT_TAG_TABLE_NOT_FOUND: 目标 HMI 中未找到默认变量表"
                 )
 
-            default_table.Tags.Import(file_info, import_opts)
+            tags_collection = default_table.Tags
+            before_tags = enumerate_tag_names(tags_collection)
 
-            result.objects_created = tag_count
-            result.success = True
+            tags_collection.Import(file_info, import_opts)
+
+            after_tags = enumerate_tag_names(tags_collection)
+            new_tags = [t for t in after_tags if t not in before_tags]
+
+            result.objects_created = len(new_tags) if new_tags else tag_count
             result.api_calls.append(
                 f"TagFolder.DefaultTagTable.Tags.Import(FileInfo, ImportOptions.Override) "
-                f"→ {tag_count} tags: {tag_names} [sha256={sha256[:16]}...]"
+                f"→ before={len(before_tags)}, after={len(after_tags)}, new={new_tags} [sha256={sha256[:16]}...]"
             )
+
+            # 验证: 如果 tag_names 已知，确认至少一个已导入
+            if tag_names and not any(n in after_tags for n in tag_names):
+                result.diagnostics.append(Diagnostic(
+                    code=DiagnosticCodes.IMPORT_TIA_EXCEPTION,
+                    severity=DiagnosticSeverity.WARNING,
+                    phase="P30_TAG_TABLES_AND_TAGS",
+                    message=(
+                        f"VERIFICATION_WARNING: Import 调用无异常，但导入后未找到预期变量。"
+                        f" expected={tag_names}, before={before_tags}, after={after_tags}"
+                    ),
+                ))
+            result.success = True
 
         except Exception as e:
             result.diagnostics.append(Diagnostic(
@@ -406,6 +517,15 @@ class ClassicOpennessExecutor:
                 severity=DiagnosticSeverity.ERROR,
                 phase="P30_TAG_TABLES_AND_TAGS",
                 message=f"DefaultTagTable 导入失败 (kind=individual_tags): {e}",
+                details={
+                    "stage": "IMPORT_TAG_DEFAULT",
+                    "xml_path": xml_path,
+                    "exception_chain": collect_exception_chain(e),
+                    "hmi_target_type": describe_dotnet_object(hmi_software),
+                    "default_table_type": describe_dotnet_object(
+                        getattr(getattr(hmi_software, "TagFolder", None), "DefaultTagTable", None)
+                    ),
+                },
             ))
 
         return result
@@ -495,31 +615,113 @@ class ClassicOpennessExecutor:
     # Step 1: 定位 Classic HMI Target
     # ------------------------------------------------------------------
 
-    def locate_hmi_target(self, project) -> tuple:
-        """定位 Classic HMI 目标设备。
+    def locate_hmi_target(self, project, expected_device_name: str | None = None) -> tuple:
+        """定位 Classic HMI 目标设备（递归遍历 + 类型严格验证）。
 
-        返回: (hmi_software, device, device_item) 或 (None, None, None)
+        遍历所有 Device 和递归 DeviceItems，收集所有候选 software 对象，
+        只返回真正的 Classic HmiTarget。
+
+        禁止接受: PlcSoftware, HmiUnifiedTarget, None, SoftwareContainer 基类。
+
+        返回: (hmi_software, device, device_item) 或抛出详细异常
         """
         if not self._clr_available or project is None:
             return None, None, None
 
+        candidates = []
+
         try:
             for device in project.Devices:
-                for item in device.DeviceItems:
+                for device_item in self._walk_device_items(device):
                     try:
                         from Siemens.Engineering.HW.Features import SoftwareContainer
-                        sw_container = item.GetService[SoftwareContainer]()
-                        if sw_container and sw_container.Software:
-                            sw = sw_container.Software
-                            sw_type = type(sw).__name__
-                            if "Hmi" in sw_type:
-                                return sw, device, item
+                        sw_container = device_item.GetService[SoftwareContainer]()
+                        if sw_container is None or sw_container.Software is None:
+                            continue
+
+                        sw = sw_container.Software
+                        info = describe_dotnet_object(sw)
+                        info["device_name"] = _safe_device_name(device)
+                        info["device_item_name"] = _safe_device_name(device_item)
+                        candidates.append(info)
+
+                        if self._is_classic_hmi_target(sw):
+                            if expected_device_name:
+                                if not self._matches_expected_device(
+                                    device, device_item, sw, expected_device_name
+                                ):
+                                    continue
+                            return sw, device, device_item
+
                     except Exception:
                         continue
         except Exception:
             pass
 
+        # 未找到 — 返回 None 元组但记录候选信息供调试
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(
+            "CLASSIC_HMI_TARGET_NOT_FOUND: 未找到 Classic HmiTarget，"
+            f"候选对象: {json.dumps(candidates, default=str, ensure_ascii=False)}"
+        )
         return None, None, None
+
+    @staticmethod
+    def _walk_device_items(device):
+        """递归遍历 Device 下所有 DeviceItems（含嵌套子级）。"""
+        def _recurse(items):
+            try:
+                for item in items:
+                    yield item
+                    # 递归子级 DeviceItems
+                    sub_items = getattr(item, "DeviceItems", None)
+                    if sub_items is not None:
+                        yield from _recurse(sub_items)
+            except Exception:
+                pass
+
+        top_items = getattr(device, "DeviceItems", None)
+        if top_items is not None:
+            yield from _recurse(top_items)
+
+    @staticmethod
+    def _is_classic_hmi_target(software) -> bool:
+        """严格判定是否为 Classic HmiTarget。
+
+        必须满足:
+          - .NET 类型包含 'Hmi' 但不包含 'Unified'
+          - 不是 PlcSoftware
+        """
+        sw_type_name = type(software).__name__
+        try:
+            dotnet_full = str(software.GetType().FullName)
+        except Exception:
+            dotnet_full = sw_type_name
+
+        # 排除 Unified
+        if "Unified" in dotnet_full or "Unified" in sw_type_name:
+            return False
+        # 排除 PLC
+        if "Plc" in dotnet_full or "Plc" in sw_type_name:
+            return False
+        # 必须包含 Hmi
+        if "Hmi" in dotnet_full or "Hmi" in sw_type_name:
+            return True
+        return False
+
+    @staticmethod
+    def _matches_expected_device(device, device_item, software, expected_name: str) -> bool:
+        """检查设备是否匹配期望名称。"""
+        for obj in (device, device_item, software):
+            for attr in ("Name", "DeviceName", "TypeIdentifier"):
+                try:
+                    v = getattr(obj, attr, None)
+                    if v and str(v) == expected_name:
+                        return True
+                except Exception:
+                    pass
+        return False
 
     # ------------------------------------------------------------------
     # Step 2: 导入连接
@@ -603,17 +805,39 @@ class ClassicOpennessExecutor:
                 # 官方 API: TagFolder.DefaultTagTable.Tags.Import(FileInfo, ImportOptions)
                 tag_folder = hmi_software.TagFolder
                 default_table = tag_folder.DefaultTagTable
-                default_table.Tags.Import(file_info, import_opts)
-                result.objects_created = tag_count
+
+                if default_table is None:
+                    raise RuntimeError(
+                        "DEFAULT_TAG_TABLE_NOT_FOUND: 目标 HMI 中未找到默认变量表"
+                    )
+
+                tags_collection = default_table.Tags
+                before_tags = enumerate_tag_names(tags_collection)
+
+                tags_collection.Import(file_info, import_opts)
+
+                after_tags = enumerate_tag_names(tags_collection)
+                new_tags = [t for t in after_tags if t not in before_tags]
+
+                result.objects_created = len(new_tags) if new_tags else tag_count
                 result.api_calls.append(
                     f"TagFolder.DefaultTagTable.Tags.Import(FileInfo(tags.xml), ImportOptions.Override) "
-                    f"→ {tag_count} tags: {tag_names}"
+                    f"→ before={len(before_tags)}, after={len(after_tags)}, new={new_tags}, expected={tag_names}"
                 )
+
+                # 验证：确认至少一个预期变量已导入
+                if tag_names and not any(n in after_tags for n in tag_names):
+                    result.diagnostics.append(Diagnostic(
+                        code=DiagnosticCodes.IMPORT_TIA_EXCEPTION,
+                        severity=DiagnosticSeverity.WARNING,
+                        phase="P30_TAG_TABLES_AND_TAGS",
+                        message=(
+                            f"VERIFICATION_WARNING: Import 未抛出异常但变量未出现在 DefaultTagTable。"
+                            f" expected={tag_names}, before={before_tags}, after={after_tags}"
+                        ),
+                    ))
             else:
-                result.objects_created = tag_count
-                result.api_calls.append(
-                    f"TagFolder.DefaultTagTable.Tags[no-ImportOptions]={tag_count} tags"
-                )
+                raise RuntimeError("ImportOptions.Override 不可用，禁止使用空选项替代")
 
             result.success = True
 
@@ -623,6 +847,15 @@ class ClassicOpennessExecutor:
                 severity=DiagnosticSeverity.ERROR,
                 phase="P30_TAG_TABLES_AND_TAGS",
                 message=f"Tag Table 导入 DefaultTagTable 失败: {e}",
+                details={
+                    "stage": "IMPORT_TAG_DEFAULT_TABLE",
+                    "xml_path": temp_path,
+                    "exception_chain": collect_exception_chain(e),
+                    "hmi_target_type": describe_dotnet_object(hmi_software),
+                    "default_table_type": describe_dotnet_object(
+                        getattr(getattr(hmi_software, "TagFolder", None), "DefaultTagTable", None)
+                    ),
+                },
             ))
             return result
 
@@ -884,6 +1117,204 @@ class ClassicOpennessExecutor:
             return result
 
         return result
+
+    # ------------------------------------------------------------------
+    # 独立探针 — 最小变量导入闭环验证
+    # ------------------------------------------------------------------
+
+    def import_exact_exported_tag_probe(
+        self,
+        hmi_software,
+        xml_path: str,
+        expected_tag_name: str,
+    ) -> dict[str, Any]:
+        """独立探针：使用真实 TIA 导出 XML 验证最小导入闭环。
+
+        流程: DefaultTagTable → enumerate_before → Import → enumerate_after → Find
+        
+        只用于诊断，禁止导入 Connection/Screen/Script/Compile。
+
+        参数:
+            hmi_software: Classic HMI 软件对象
+            xml_path: 真实 TIA 导出的变量 XML 路径
+            expected_tag_name: 导入后期望存在的变量名
+
+        返回:
+            成功时返回完整诊断信息 dict
+            
+        异常:
+            RuntimeError: Import 失败或导入后验证失败
+        """
+        # 1. 获取 DefaultTagTable
+        tag_folder = hmi_software.TagFolder
+        default_table = tag_folder.DefaultTagTable
+
+        if default_table is None:
+            raise RuntimeError(
+                "DEFAULT_TAG_TABLE_NOT_FOUND: DefaultTagTable 为 None。"
+                f" hmi_software={describe_dotnet_object(hmi_software)}"
+            )
+
+        tags = default_table.Tags
+
+        # 2. 记录导入前状态
+        before = enumerate_tag_names(tags)
+
+        # 3. 检查 XML 文件
+        xml_info = inspect_xml_document(xml_path)
+
+        # 4. 执行导入
+        try:
+            import_opts = self._make_import_options()
+            if import_opts is None:
+                raise RuntimeError("ImportOptions.Override 不可用")
+
+            file_info = self._make_file_info(os.path.abspath(xml_path))
+            import_result = tags.Import(file_info, import_opts)
+        except Exception as exc:
+            raise RuntimeError(
+                f"EXACT_EXPORTED_TAG_IMPORT_FAILED: 真实 TIA 导出的变量 XML 原样导入失败。"
+                f" xml_path={os.path.abspath(xml_path)},"
+                f" xml_exists={os.path.isfile(xml_path)},"
+                f" xml_size={os.path.getsize(xml_path) if os.path.isfile(xml_path) else -1},"
+                f" before={before},"
+                f" exception_chain={collect_exception_chain(exc)},"
+                f" target={describe_dotnet_object(hmi_software)},"
+                f" default_table={describe_dotnet_object(default_table)},"
+                f" tags_obj={describe_dotnet_object(tags)}"
+            ) from exc
+
+        # 5. 记录导入后状态
+        after = enumerate_tag_names(tags)
+
+        # 6. 查找预期变量
+        imported_tag = find_tag(tags, expected_tag_name)
+
+        if imported_tag is None:
+            raise RuntimeError(
+                f"IMPORT_RETURNED_BUT_TAG_NOT_FOUND: "
+                f"Import 调用没有抛出异常，但导入后变量 '{expected_tag_name}' "
+                f"仍不存在于默认变量表。"
+                f" before={before}, after={after},"
+                f" import_result={describe_dotnet_object(import_result)}"
+            )
+
+        return {
+            "success": True,
+            "expected_tag_name": expected_tag_name,
+            "before": before,
+            "after": after,
+            "new_tags": [t for t in after if t not in before],
+            "imported_tag": describe_dotnet_object(imported_tag),
+            "xml_info": xml_info,
+            "target": describe_dotnet_object(hmi_software),
+            "default_table": describe_dotnet_object(default_table),
+            "tags_composition": describe_dotnet_object(tags),
+        }
+
+    def validate_external_tag_references(
+        self, hmi_software, xml_path: str,
+    ) -> dict[str, Any]:
+        """导入前检查 XML 中的外部变量引用（Connection / ControllerTag）。
+
+        解析 XML 中 Connection 和 ControllerTag 引用，
+        确认引用目标存在于 HMI 中，否则返回 BLOCKED 状态。
+
+        禁止在引用不存在时调用 Import。
+        """
+        result: dict[str, Any] = {
+            "status": "OK",
+            "references": [],
+            "blocked_reasons": [],
+        }
+
+        try:
+            tree = ET.parse(xml_path)
+            root = tree.getroot()
+        except Exception as exc:
+            result["status"] = "PARSE_ERROR"
+            result["blocked_reasons"].append(f"XML 解析失败: {exc}")
+            return result
+
+        # 提取所有 Connection 和 ControllerTag 引用
+        ns = _extract_namespace(root.tag)
+
+        for elem in root.iter():
+            local = _local_tag_name(elem.tag)
+
+            # 提取变量名
+            tag_name = None
+            name_elem = elem.find(f"{ns}Name" if ns else "Name")
+            if name_elem is not None and name_elem.text:
+                tag_name = name_elem.text.strip()
+            else:
+                tag_name = elem.get("Name")
+
+            if not tag_name:
+                continue
+
+            # 变量名合法性检查
+            if "." in tag_name and local in ("Tag", "Hmi.Tag.Tag"):
+                result["blocked_reasons"].append(
+                    f"变量名 '{tag_name}' 包含句点 '.'"
+                )
+            if "\\" in tag_name and local in ("Tag", "Hmi.Tag.Tag"):
+                result["blocked_reasons"].append(
+                    f"变量名 '{tag_name}' 包含反斜杠 '\\'"
+                )
+
+        # 提取 Connection 引用
+        for conn_elem in root.iter():
+            conn_local = _local_tag_name(conn_elem.tag)
+            if conn_local == "Connection" and conn_elem.get("TargetID") == "@OpenLink":
+                conn_name_elem = conn_elem.find(f"{ns}Name" if ns else "Name")
+                if conn_name_elem is not None and conn_name_elem.text:
+                    conn_name = conn_name_elem.text.strip()
+                    exists = self._connection_exists(hmi_software, conn_name)
+                    ref_info = {
+                        "type": "connection",
+                        "name": conn_name,
+                        "exists": exists,
+                    }
+                    result["references"].append(ref_info)
+                    if not exists:
+                        result["blocked_reasons"].append(
+                            f"Connection '{conn_name}' 不存在于 HMI"
+                        )
+
+        # 提取 ControllerTag 引用
+        for ct_elem in root.iter():
+            ct_local = _local_tag_name(ct_elem.tag)
+            if ct_local == "ControllerTag" and ct_elem.get("TargetID") == "@OpenLink":
+                ct_name_elem = ct_elem.find(f"{ns}Name" if ns else "Name")
+                if ct_name_elem is not None and ct_name_elem.text:
+                    ct_name = ct_name_elem.text.strip()
+                    ref_info = {
+                        "type": "controller_tag",
+                        "name": ct_name,
+                        "exists": None,  # 需要项目级检查
+                    }
+                    result["references"].append(ref_info)
+
+        if result["blocked_reasons"]:
+            result["status"] = "BLOCKED"
+
+        return result
+
+    @staticmethod
+    def _connection_exists(hmi_software, connection_name: str) -> bool:
+        """检查 HMI 中是否存在指定连接。"""
+        try:
+            connections = hmi_software.Connections
+            for conn in connections:
+                try:
+                    if str(conn.Name) == connection_name:
+                        return True
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return False
 
     # ------------------------------------------------------------------
     # 真实验收 — 重新读取 DefaultTagTable 验证
