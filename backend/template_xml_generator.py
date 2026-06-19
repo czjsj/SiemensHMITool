@@ -997,3 +997,224 @@ def _clone_matching_template_item(
         f"模板中 {otype} 控件数量不足，已复制模板控件 '{source_name}' 生成 '{new_name}'。"
     )
     return cloned, new_name
+
+
+# ========================================================================
+# V4.0 模板原型管线 — generate_from_template_v4
+# ========================================================================
+
+
+def generate_from_template_v4(
+    ir: dict,
+    template_xml: str,
+    options: dict | None = None,
+) -> dict:
+    """V4.0 模板原型管线：IR + 模板 XML → 新 XML（使用控件原型克隆 + 变量替换）。
+
+    与旧版 generate_from_template_xml 的区别：
+      - 按钮/指示灯使用模板原型系统（behavior/inidicator_mode 感知）
+      - 事件变量和动态绑定变量完全替换（无残留）
+      - 返回完整诊断信息（template_analyzed, prototype_matched, pre_import_validated）
+
+    参数:
+        ir: 校验后的 HMI 画面 IR。
+        template_xml: 从 TIA Portal 导出的模板画面 XML 字符串。
+        options: 可选配置 dict。
+
+    返回:
+        {
+            "ok": bool,
+            "xml": str | None,
+            "xml_path": str | None,
+            "warnings": list[str],
+            "diagnostics": {
+                "template_analyzed": { "buttons": int, "indicators": int, "total": int },
+                "prototype_matched": [{ "item_id": str, "prototype_id": str, ... }],
+                "pre_import_validated": { "errors": int, "warnings": int },
+            },
+        }
+    """
+    import xml.etree.ElementTree as ET
+    from backend.template.prototype_extractor import analyze_template_screen
+    from backend.template.prototype_registry import PrototypeRegistry, PrototypeNotFoundError
+    from backend.template.xml_rewrite_rules import (
+        clone_prototype_node,
+        replace_control_name,
+        replace_control_text,
+        replace_geometry,
+        replace_all_tag_references,
+        ensure_no_placeholder_tags,
+        assign_unique_control_ids,
+    )
+    from backend.template.xml_utils import collect_existing_ids, deepcopy_xml_node
+    from backend.template.template_binding_validator import validate_generated_screen_xml
+    from backend.variable_engine import VariableEngine
+
+    options = options or {}
+    warnings: list[str] = []
+    diagnostics: dict[str, Any] = {
+        "template_analyzed": {},
+        "prototype_matched": [],
+        "pre_import_validated": {},
+    }
+
+    # ---- Step 1: VariableEngine enrich ----
+    engine = VariableEngine()
+    project = engine.enrich(ir)
+
+    # ---- Step 2: Template analysis ----
+    try:
+        profile = analyze_template_screen(template_xml)
+    except Exception as e:
+        return {
+            "ok": False,
+            "xml": None, "xml_path": None,
+            "warnings": [f"模板分析失败: {e}"],
+            "diagnostics": diagnostics,
+        }
+
+    diagnostics["template_analyzed"] = {
+        "buttons": len(profile.buttons),
+        "indicators": len(profile.indicators),
+        "others": len(profile.others),
+        "total": len(profile.all_prototypes()),
+    }
+    warnings.extend(profile.diagnostics)
+
+    # ---- Step 3: Prototype matching for each screen item ----
+    registry = PrototypeRegistry(profile)
+
+    # Collect template variable names
+    template_tags: set[str] = set()
+    for proto in profile.all_prototypes():
+        for ref in proto.tag_references:
+            if "Template_" in ref.tag_name or proto.source_name in ref.tag_name:
+                template_tags.add(ref.tag_name)
+
+    # Parse template root for XML operations
+    try:
+        root = ET.fromstring(template_xml)
+    except ET.ParseError:
+        return {
+            "ok": False,
+            "xml": None, "xml_path": None,
+            "warnings": ["模板 XML 格式无效"],
+            "diagnostics": diagnostics,
+        }
+
+    used_ids = collect_existing_ids(root)
+
+    # Build screen XML
+    meta = ir.get("meta", {})
+    screen_name = meta.get("screen_name", "GeneratedScreen")
+    resolution = meta.get("resolution", "1280x800")
+    try:
+        w, h = resolution.split("x") if "x" in resolution else (1280, 800)
+        w, h = int(w), int(h)
+    except Exception:
+        w, h = 1280, 800
+
+    # Generate controls
+    all_generated_xml: list[str] = []
+    matched_count = 0
+    failed_items: list[str] = []
+
+    for screen in project.screens:
+        for item in screen.items:
+            try:
+                proto = registry.find_for_item(item)
+            except PrototypeNotFoundError as e:
+                failed_items.append(item.id)
+                warnings.append(str(e))
+                continue
+
+            # Clone prototype
+            item_id = item.id
+            item_name = item.name or item_id
+            item_text = item.text.get("zh-CN", item_id) if item.text else item_id
+            tag_binding = item.tag_binding or ""
+
+            cloned = clone_prototype_node(proto.xml_node, item_name, used_ids)
+
+            # Replace geometry
+            geo = item.geometry
+            replace_geometry(cloned, {
+                "x": geo.x, "y": geo.y,
+                "width": geo.width, "height": geo.height,
+                "radius": geo.radius,
+            })
+
+            # Replace text
+            if item_text:
+                replace_control_text(cloned, item_text)
+
+            # Replace tag references
+            old_tags = [t for t in template_tags if t in proto.replaceable_tags or "Template_" in t]
+            if old_tags and tag_binding:
+                replaced = replace_all_tag_references(cloned, old_tags, tag_binding)
+                if replaced == 0 and old_tags:
+                    # Try broader replacement
+                    for ot in old_tags:
+                        replace_all_tag_references(cloned, [ot], tag_binding)
+
+            # Verify no placeholder remains
+            remaining = ensure_no_placeholder_tags(cloned, list(template_tags))
+            if remaining:
+                warnings.append(f"控件 '{item_id}' 残留模板变量: {remaining}")
+
+            # Serialize
+            xml_str = ET.tostring(cloned, encoding="unicode")
+            all_generated_xml.append(xml_str)
+            matched_count += 1
+
+            diagnostics["prototype_matched"].append({
+                "item_id": item_id,
+                "prototype_id": proto.prototype_id,
+                "item_type": item.type.value if hasattr(item.type, "value") else str(item.type),
+                "tag_replaced": tag_binding,
+                "placeholder_remaining": len(remaining) if remaining else 0,
+            })
+
+    # ---- Step 4: Build screen XML ----
+    screen_xml_parts = [
+        '<?xml version="1.0" encoding="utf-8"?>',
+        '<Document xmlns="http://www.siemens.com/automation/SimaticML">',
+        f'  <SW.Screen>',
+        f'    <AttributeList><Name>{screen_name}</Name><Width>{w}</Width><Height>{h}</Height></AttributeList>',
+        f'    <ObjectList>',
+    ]
+    screen_xml_parts.extend(f"      {ctrl}" for ctrl in all_generated_xml)
+    screen_xml_parts.append(f'    </ObjectList>')
+    screen_xml_parts.append(f'  </SW.Screen>')
+    screen_xml_parts.append(f'</Document>')
+
+    screen_xml = "\n".join(screen_xml_parts)
+
+    # ---- Step 5: Pre-import validation ----
+    tag_names = [t.name for t in project.tags]
+    item_ids = [item.id for screen in project.screens for item in screen.items]
+    forbidden_placeholders = [t for t in template_tags if "Template_" in t]
+
+    pre_diags = validate_generated_screen_xml(
+        screen_xml, tag_names, forbidden_placeholders, item_ids
+    )
+    pre_errors = [d for d in pre_diags if d.get("severity") == "error"]
+    pre_warnings = [d for d in pre_diags if d.get("severity") == "warning"]
+
+    diagnostics["pre_import_validated"] = {
+        "errors": len(pre_errors),
+        "warnings": len(pre_warnings),
+        "error_details": [d.get("message", "") for d in pre_errors],
+    }
+
+    ok = len(pre_errors) == 0 and len(failed_items) == 0
+
+    return {
+        "ok": ok,
+        "xml": screen_xml if ok else None,
+        "xml_path": None,
+        "warnings": warnings + [d.get("message", "") for d in pre_warnings],
+        "diagnostics": diagnostics,
+        "matched_count": matched_count,
+        "failed_items": failed_items,
+    }

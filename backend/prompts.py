@@ -240,6 +240,26 @@ SYSTEM_PROMPT = f"""你是一名资深的西门子 WinCC / 博途(TIA Portal) HM
 
 {JSON_SELF_CHECK}
 
+【V4.0 模板绑定约束（必须遵守）】
+- 你不能直接生成 TIA XML。
+- 你不能生成底层 EventHandler XML。
+- 你不能生成底层 Dynamization XML。
+- 你只能输出 HMI IR JSON。
+
+按钮必须输出：
+  - behavior: "momentary" | "toggle" | "set" | "reset" | "navigate"
+  - binding.tag（除非 behavior=navigate）
+  - template_ref（如 BTN_MOMENTARY_TEMPLATE、BTN_TOGGLE_TEMPLATE）
+
+指示灯必须输出：
+  - indicator_mode: "bool_color" | "bool_blink" | "multi_state" | "alarm" | "warning" | "status"
+  - binding.tag
+  - template_ref（如 LMP_STATUS_TEMPLATE、LMP_ALARM_TEMPLATE）
+
+所有控件引用的变量必须出现在 tags 列表中。
+如果用户没有提供 PLC 地址，address 必须为 null，metadata.pending_mapping=true。
+不得编造 PLC 地址。
+
 【输出格式（务必严格遵守）】
 {IR_SCHEMA_DOC}
 

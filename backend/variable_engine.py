@@ -131,6 +131,7 @@ class VariableEngine:
         self,
         legacy_ir: Dict[str, Any],
         target_hint: str | None = None,
+        plc_tag_mapping: Dict[str, str] | None = None,
     ) -> HmiProjectSpec:
         """将旧 IR dict 转换为语义 HmiProjectSpec 并补齐推断。
 
@@ -139,16 +140,39 @@ class VariableEngine:
           - EventSpec/ActionSpec（根据 tag_mode 推断语义动作）
           - BindingSpec（Indicator 颜色/闪烁动态绑定）
           - 命名建议
+          - PLC 地址映射（通过 plc_tag_mapping 进行语义匹配）
 
         参数:
             legacy_ir: 旧版 IR dict（validate_ir 输出）
             target_hint: 可选设备提示 "basic"/"comfort"/"unified"
+            plc_tag_mapping: 可选 PLC 地址映射 {"Motor_Start": "DB10.DBX0.0", ...}
+                             支持 4 级语义匹配：
+                               1. 精确变量名匹配
+                               2. 去掉 BTN_/STS_/LMP_ 前缀后匹配
+                               3. 按 item id 匹配
+                               4. 按中文文本匹配
 
         返回:
             HmiProjectSpec 实例
         """
+        # 变量冲突检测 — 在适配器转换之前，对原始 IR 中的 tags 进行
+        self._detect_variable_conflicts_in_raw_ir(legacy_ir)
+
         adapter = LegacyIrAdapter(target_hint=target_hint)
         project, _diags = adapter.convert(legacy_ir)
+
+        # 将原始 IR 中的变量冲突传递到项目诊断
+        raw_conflicts = legacy_ir.get("_variable_conflicts") or []
+        for c in raw_conflicts:
+            project.diagnostics.append(Diagnostic(
+                code=DiagnosticCodes.IR_VALIDATION_ERROR,
+                severity=DiagnosticSeverity.ERROR,
+                phase="P20_TAGS",
+                object_type="tag",
+                object_name=c["name"],
+                message=f"变量冲突: '{c['name']}' 存在{c['kind']} ({c['detail']})",
+                remediation="请统一变量定义，避免同名不同类型或不同地址",
+            ))
 
         # 收集已有 tag/screen/script 名称
         existing_tags: Dict[str, TagSpec] = {}
@@ -188,6 +212,10 @@ class VariableEngine:
                 if t.name and t.name not in merged:
                     merged[t.name] = t
             project.tags = list(merged.values())
+
+        # PLC 地址映射（语义匹配四层策略）
+        if plc_tag_mapping:
+            self._apply_plc_mapping(project, plc_tag_mapping)
 
         return project
 
@@ -546,6 +574,140 @@ class VariableEngine:
             ))
 
     # ------------------------------------------------------------------
+    # PLC 地址映射 — 语义匹配（四层策略）
+    # ------------------------------------------------------------------
+
+    def _apply_plc_mapping(
+        self,
+        project: HmiProjectSpec,
+        plc_tag_mapping: Dict[str, str],
+    ):
+        """将 PLC 地址映射应用到 HmiProjectSpec 的 tags 中。
+
+        语义匹配四层策略（按优先级依次尝试）：
+          1. 精确匹配变量名
+          2. 去掉 BTN_/STS_/LMP_/MEM_ 前缀后匹配
+          3. 按 screen item id 匹配
+          4. 按中文文本匹配
+
+        匹配不到时保留 address=null，标记 pending_mapping=true。
+        """
+        if not plc_tag_mapping:
+            return
+
+        # 建立所有 screen items 的索引（按 id 和中文文本）
+        item_by_id: Dict[str, list[ScreenItemSpec]] = {}
+        item_by_text: Dict[str, list[ScreenItemSpec]] = {}
+        for screen in project.screens:
+            for item in screen.items:
+                item_by_id.setdefault(item.id, []).append(item)
+                zh_text = item.text.get("zh-CN", "").strip()
+                if zh_text:
+                    item_by_text.setdefault(zh_text, []).append(item)
+
+        # 预处理映射表 — 将 "VariableName" → "DB10.DBX0.0"
+        mapping_stripped: Dict[str, str] = {}
+        _KNOWN_PREFIXES = ("BTN_", "STS_", "LMP_", "MEM_", "IO_", "SIO_")
+        for key, addr in plc_tag_mapping.items():
+            mapping_stripped[key] = addr
+            for pfx in _KNOWN_PREFIXES:
+                if key.startswith(pfx) and len(key) > len(pfx):
+                    stripped = key[len(pfx):]
+                    if stripped not in mapping_stripped:
+                        mapping_stripped[stripped] = addr
+                    break
+
+        for tag in project.tags:
+            tag_name = tag.name
+            address = None
+
+            # Level 1: 精确变量名匹配
+            if tag_name in plc_tag_mapping:
+                address = plc_tag_mapping[tag_name]
+
+            # Level 2: 去掉前缀后匹配
+            if address is None:
+                for pfx in _KNOWN_PREFIXES:
+                    if tag_name.startswith(pfx) and len(tag_name) > len(pfx):
+                        stripped = tag_name[len(pfx):]
+                        if stripped in plc_tag_mapping:
+                            address = plc_tag_mapping[stripped]
+                            break
+
+            # Level 3: 按 item id 匹配（tag 名与某个 item id 相同）
+            if address is None and tag_name in item_by_id:
+                for item in item_by_id[tag_name]:
+                    if item.id in plc_tag_mapping:
+                        address = plc_tag_mapping[item.id]
+                        break
+
+            # Level 4: 按中文文本匹配
+            if address is None:
+                for zh_text, items in item_by_text.items():
+                    if zh_text in plc_tag_mapping:
+                        # 检查此 tag 是否关联到某个匹配的 item
+                        for item in items:
+                            if item.tag_binding == tag_name:
+                                address = plc_tag_mapping[zh_text]
+                                break
+                        if address is not None:
+                            break
+
+            # 应用地址
+            if address is not None:
+                tag.address = address
+                tag.scope = TagScope.EXTERNAL
+                if "pending_mapping" in tag.metadata:
+                    del tag.metadata["pending_mapping"]
+            else:
+                # 未匹配到 — 保持 address 为 None/null
+                tag.metadata["pending_mapping"] = True
+
+    @staticmethod
+    def _detect_variable_conflicts_in_raw_ir(legacy_ir: Dict[str, Any]):
+        """检测旧 IR dict 中的变量冲突（在适配器转换前执行）。
+
+        1. 同名同类型 — 允许复用（不报错）
+        2. 同名不同类型 — 记录冲突标记
+        3. 同名不同地址 — 记录冲突标记
+
+        冲突标记存储在每个变量的 metadata 中，后续 enrich 流程会检查。
+        """
+        raw_tags: list = legacy_ir.get("tags") or []
+        seen: Dict[str, dict] = {}
+        conflicts: list[dict] = []
+
+        for t in raw_tags:
+            name = (t.get("name") or "").strip()
+            if not name:
+                continue
+            if name in seen:
+                existing = seen[name]
+                existing_dt = existing.get("data_type", "?")
+                current_dt = t.get("data_type", "?")
+                existing_addr = existing.get("address") or ""
+                current_addr = t.get("address") or ""
+
+                if existing_dt != current_dt:
+                    conflicts.append({
+                        "name": name,
+                        "kind": "type_conflict",
+                        "detail": f"'{existing_dt}' vs '{current_dt}'",
+                    })
+                elif existing_addr and current_addr and existing_addr != current_addr:
+                    conflicts.append({
+                        "name": name,
+                        "kind": "address_conflict",
+                        "detail": f"'{existing_addr}' vs '{current_addr}'",
+                    })
+            else:
+                seen[name] = t
+
+        # 将冲突信息写入 legacy_ir 供后续使用
+        if conflicts:
+            legacy_ir.setdefault("_variable_conflicts", []).extend(conflicts)
+
+    # ------------------------------------------------------------------
     # Backfill: 旧格式 VBS 脚本生成（仅 backward compat）
     # ------------------------------------------------------------------
 
@@ -694,23 +856,50 @@ class VariableEngine:
     # 命名与地址生成
     # ------------------------------------------------------------------
 
+    # TIA 变量名非法字符（统一替换为下划线）
+    _ILLEGAL_NAME_CHARS: set[str] = {
+        "/", "\\", "@", "#", "$", "%", "^", "&", "*", "(", ")",
+        "-", "+", "=", "[", "]", "{", "}", "|", ";", ":", "\"",
+        "'", "<", ">", ",", "?", " ", "\t", "~", "`",
+    }
+
+    @classmethod
+    def normalize_tag_name(cls, name: str) -> str:
+        """将变量名中的非法字符统一替换为下划线。
+
+        TIA Portal 变量名要求：只能包含字母、数字、下划线，不能以数字开头。
+        """
+        result = name
+        for ch in cls._ILLEGAL_NAME_CHARS:
+            result = result.replace(ch, "_")
+        # 合并连续下划线
+        while "__" in result:
+            result = result.replace("__", "_")
+        # 去除首尾下划线（保留有意义部分）
+        result = result.strip("_")
+        if not result:
+            result = "VAR_Unnamed"
+        return result
+
     def _make_tag_name(
         self,
         oid: str,
         prefix: str,
         existing_tags: dict,
     ) -> str:
-        """生成变量名。"""
+        """生成变量名（自动规范化非法字符）。"""
         all_prefixes = {
             "BTN_", "MEM_", "STS_", "LMP_", "IO_", "SIO_", "TXT_",
         }
-        base_name = oid
+        # 先规范化 oid 中的非法字符
+        sanitized_oid = self.normalize_tag_name(oid)
+        base_name = sanitized_oid
         for p in sorted(all_prefixes, key=len, reverse=True):
-            if oid.startswith(p) and len(oid) > len(p):
-                base_name = oid[len(p):]
+            if sanitized_oid.startswith(p) and len(sanitized_oid) > len(p):
+                base_name = sanitized_oid[len(p):]
                 break
 
-        candidate = f"{prefix}{base_name}"
+        candidate = self.normalize_tag_name(f"{prefix}{base_name}")
         if candidate in existing_tags:
             idx = 2
             while f"{candidate}_{idx}" in existing_tags:

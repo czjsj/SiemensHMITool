@@ -35,6 +35,22 @@ openness:
     template_export_dir: exports/templates
     generated_xml_dir: exports/generated_from_template
     import_option: Override
+  # V4.0: 模板原型系统配置
+  template:
+    enabled: true
+    require_prototype_for_button: true
+    require_prototype_for_indicator: true
+    fail_on_placeholder_remaining: true
+    default_button_template: BTN_MOMENTARY_TEMPLATE
+    default_indicator_template: LMP_STATUS_TEMPLATE
+    fallback_to_simaticml: false
+    allow_missing_indicator_template: false
+    allow_missing_button_template: false
+  # V4.0: 部署顺序配置
+  deployment:
+    import_tags_before_screens: true
+    compile_after_import: true
+    verify_after_compile: true
   unified_direct:
     enabled: true
     update_existing_screen: true

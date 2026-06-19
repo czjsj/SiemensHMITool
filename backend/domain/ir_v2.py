@@ -15,14 +15,17 @@ from pydantic import BaseModel, Field, model_validator
 
 from .enums import (
     BindingKind,
+    ButtonBehavior,
     ConflictPolicy,
     ConnectionKind,
     HmiFamily,
+    IndicatorMode,
     MissingDependencyPolicy,
     ScriptLanguage,
     SemanticEvent,
     SemanticActionType,
     ScreenItemType,
+    TagDirection,
     TagScope,
     UnsupportedFeaturePolicy,
 )
@@ -147,6 +150,13 @@ class TagSpec(BaseModel):
         default_factory=dict, description="多语言注释"
     )
     read_only: bool = Field(default=False, description="是否只读")
+    # V4.0 新增
+    direction: TagDirection = Field(
+        default=TagDirection.READ_WRITE, description="变量读写方向"
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="扩展元数据（如 pending_mapping）"
+    )
 
     @model_validator(mode="after")
     def _check_external_tag_constraints(self):
@@ -190,6 +200,19 @@ class BindingSpec(BaseModel):
         default_factory=dict, description="绑定配置（阈值、状态映射等）"
     )
     fallback: Any | None = Field(default=None, description="绑定失败时的回退值")
+    # V4.0 新增: 变量连接属性
+    tag: str | None = Field(
+        default=None, description="绑定的变量名（语义级，如 BTN_Motor_Start）"
+    )
+    direction: TagDirection = Field(
+        default=TagDirection.READ_WRITE, description="变量方向"
+    )
+    connection: str | None = Field(
+        default=None, description="关联 HMI 连接名"
+    )
+    plc_address: str | None = Field(
+        default=None, description="PLC 地址（如 DB10.DBX0.0）"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -284,6 +307,22 @@ class ScreenItemSpec(BaseModel):
     )
     events: list[EventSpec] = Field(
         default_factory=list, description="事件列表"
+    )
+    # V4.0 新增: 模板绑定字段
+    template_ref: str | None = Field(
+        default=None, description="模板原型引用（如 BTN_MOMENTARY_TEMPLATE）"
+    )
+    prototype_role: str | None = Field(
+        default=None, description="原型角色（如 momentary_button/alarm_indicator）"
+    )
+    behavior: ButtonBehavior | None = Field(
+        default=None, description="按钮行为模式"
+    )
+    indicator_mode: IndicatorMode | None = Field(
+        default=None, description="指示灯模式"
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="扩展元数据（如 pending_mapping）"
     )
 
 

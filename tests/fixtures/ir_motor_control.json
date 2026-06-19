@@ -1,0 +1,101 @@
+{
+  "meta": {
+    "screen_name": "Motor_Control",
+    "title": "电机控制画面",
+    "hmi_type": "Comfort",
+    "resolution": "1280x800",
+    "generation_mode": "auto"
+  },
+  "objects": [
+    {
+      "id": "BTN_Start",
+      "type": "Button",
+      "x": 80,
+      "y": 120,
+      "width": 120,
+      "height": 50,
+      "text": "启动",
+      "background_color": "#2BB673",
+      "process_tag": "BTN_Motor_Start",
+      "tag_mode": "momentary"
+    },
+    {
+      "id": "BTN_Stop",
+      "type": "Button",
+      "x": 220,
+      "y": 120,
+      "width": 120,
+      "height": 50,
+      "text": "停止",
+      "background_color": "#E25563",
+      "process_tag": "BTN_Motor_Stop",
+      "tag_mode": "momentary"
+    },
+    {
+      "id": "LMP_Running",
+      "type": "Indicator",
+      "x": 260,
+      "y": 220,
+      "width": 60,
+      "height": 60,
+      "radius": 30,
+      "text": "运行",
+      "process_tag": "STS_Motor_Running",
+      "color_on": "#27D17F",
+      "color_off": "#3A4250",
+      "blink": false
+    },
+    {
+      "id": "LMP_Fault",
+      "type": "Indicator",
+      "x": 340,
+      "y": 220,
+      "width": 60,
+      "height": 60,
+      "radius": 30,
+      "text": "故障",
+      "process_tag": "STS_Motor_Fault",
+      "color_on": "#E25563",
+      "color_off": "#3A4250",
+      "blink": true
+    },
+    {
+      "id": "TXT_Title",
+      "type": "Text",
+      "x": 80,
+      "y": 30,
+      "width": 300,
+      "height": 40,
+      "text": "电机控制面板",
+      "font_size": 24,
+      "bold": true,
+      "color": "#E6EDF3"
+    }
+  ],
+  "tags": [
+    {
+      "name": "BTN_Motor_Start",
+      "data_type": "Bool",
+      "address": "",
+      "comment": "电机启动按钮"
+    },
+    {
+      "name": "BTN_Motor_Stop",
+      "data_type": "Bool",
+      "address": "",
+      "comment": "电机停止按钮"
+    },
+    {
+      "name": "STS_Motor_Running",
+      "data_type": "Bool",
+      "address": "",
+      "comment": "电机运行状态"
+    },
+    {
+      "name": "STS_Motor_Fault",
+      "data_type": "Bool",
+      "address": "",
+      "comment": "电机故障状态"
+    }
+  ]
+}

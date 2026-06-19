@@ -1,0 +1,229 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Document xmlns="http://www.siemens.com/automation/SimaticML">
+  <Engineering version="V18" />
+  <SW.Blocks>
+    <SW.ScreenFolder>
+      <SW.Screen ID="100" Name="Template_Screen">
+        <AttributeList>
+          <Name>Template_Screen</Name>
+          <DisplayName>模板画面</DisplayName>
+          <Width>1280</Width>
+          <Height>800</Height>
+        </AttributeList>
+        <ObjectList>
+          <!-- ===== Template Button: Momentary (Press/Release) ===== -->
+          <Hmi.Screen.Button ID="201">
+            <AttributeList>
+              <ObjectName>BTN_Momentary_Template</ObjectName>
+              <Left>100</Left>
+              <Top>100</Top>
+              <Width>120</Width>
+              <Height>50</Height>
+              <ProcessTag>Template_BTN_Tag</ProcessTag>
+            </AttributeList>
+            <MultilingualText ID="301" CompositionName="Text">
+              <ObjectList>
+                <MultilingualTextItem ID="302" CompositionName="Items">
+                  <AttributeList>
+                    <Culture>zh-CN</Culture>
+                    <Text><body><p>按钮</p></body></Text>
+                  </AttributeList>
+                </MultilingualTextItem>
+              </ObjectList>
+            </MultilingualText>
+            <Events>
+              <Event Name="Press">
+                <FunctionList>
+                  <SetBit>
+                    <TagName>Template_BTN_Tag</TagName>
+                    <Value>1</Value>
+                  </SetBit>
+                </FunctionList>
+              </Event>
+              <Event Name="Release">
+                <FunctionList>
+                  <ResetBit>
+                    <TagName>Template_BTN_Tag</TagName>
+                    <Value>0</Value>
+                  </ResetBit>
+                </FunctionList>
+              </Event>
+            </Events>
+          </Hmi.Screen.Button>
+
+          <!-- ===== Template Button: Toggle (Click) ===== -->
+          <Hmi.Screen.Button ID="202">
+            <AttributeList>
+              <ObjectName>BTN_Toggle_Template</ObjectName>
+              <Left>250</Left>
+              <Top>100</Top>
+              <Width>120</Width>
+              <Height>50</Height>
+              <ProcessTag>Template_BTN_Toggle_Tag</ProcessTag>
+            </AttributeList>
+            <MultilingualText ID="303" CompositionName="Text">
+              <ObjectList>
+                <MultilingualTextItem ID="304" CompositionName="Items">
+                  <AttributeList>
+                    <Culture>zh-CN</Culture>
+                    <Text><body><p>切换</p></body></Text>
+                  </AttributeList>
+                </MultilingualTextItem>
+              </ObjectList>
+            </MultilingualText>
+            <Events>
+              <Event Name="Click">
+                <FunctionList>
+                  <ToggleBit>
+                    <TagName>Template_BTN_Toggle_Tag</TagName>
+                  </ToggleBit>
+                </FunctionList>
+              </Event>
+            </Events>
+          </Hmi.Screen.Button>
+
+          <!-- ===== Template Button: Set (Click + SetBit) ===== -->
+          <Hmi.Screen.Button ID="203">
+            <AttributeList>
+              <ObjectName>BTN_Set_Template</ObjectName>
+              <Left>400</Left>
+              <Top>100</Top>
+              <Width>120</Width>
+              <Height>50</Height>
+              <ProcessTag>Template_BTN_Set_Tag</ProcessTag>
+            </AttributeList>
+            <MultilingualText ID="305" CompositionName="Text">
+              <ObjectList>
+                <MultilingualTextItem ID="306" CompositionName="Items">
+                  <AttributeList>
+                    <Culture>zh-CN</Culture>
+                    <Text><body><p>置位</p></body></Text>
+                  </AttributeList>
+                </MultilingualTextItem>
+              </ObjectList>
+            </MultilingualText>
+            <Events>
+              <Event Name="Click">
+                <FunctionList>
+                  <SetBit>
+                    <TagName>Template_BTN_Set_Tag</TagName>
+                    <Value>1</Value>
+                  </SetBit>
+                </FunctionList>
+              </Event>
+            </Events>
+          </Hmi.Screen.Button>
+
+          <!-- ===== Template Indicator: Status (bool_color) ===== -->
+          <Hmi.Screen.Circle ID="401">
+            <AttributeList>
+              <ObjectName>LMP_Status_Template</ObjectName>
+              <Left>100</Left>
+              <Top>200</Top>
+              <Width>60</Width>
+              <Height>60</Height>
+              <Radius>30</Radius>
+              <ProcessTag>Template_LMP_Tag</ProcessTag>
+              <FillColor>58,66,80</FillColor>
+              <BorderColor>120,130,140</BorderColor>
+            </AttributeList>
+            <MultilingualText ID="501" CompositionName="Text">
+              <ObjectList>
+                <MultilingualTextItem ID="502" CompositionName="Items">
+                  <AttributeList>
+                    <Culture>zh-CN</Culture>
+                    <Text><body><p>状态</p></body></Text>
+                  </AttributeList>
+                </MultilingualTextItem>
+              </ObjectList>
+            </MultilingualText>
+            <Animations>
+              <ColorAnimation>
+                <Dynamization>
+                  <TagName>Template_LMP_Tag</TagName>
+                </Dynamization>
+                <Range Value="0">
+                  <FillColor>58,66,80</FillColor>
+                </Range>
+                <Range Value="1">
+                  <FillColor>39,209,127</FillColor>
+                </Range>
+              </ColorAnimation>
+            </Animations>
+          </Hmi.Screen.Circle>
+
+          <!-- ===== Template Indicator: Alarm (bool_blink) ===== -->
+          <Hmi.Screen.Circle ID="402">
+            <AttributeList>
+              <ObjectName>LMP_Alarm_Template</ObjectName>
+              <Left>200</Left>
+              <Top>200</Top>
+              <Width>60</Width>
+              <Height>60</Height>
+              <Radius>30</Radius>
+              <ProcessTag>Template_LMP_Alarm_Tag</ProcessTag>
+              <FillColor>58,66,80</FillColor>
+              <BorderColor>120,130,140</BorderColor>
+            </AttributeList>
+            <MultilingualText ID="503" CompositionName="Text">
+              <ObjectList>
+                <MultilingualTextItem ID="504" CompositionName="Items">
+                  <AttributeList>
+                    <Culture>zh-CN</Culture>
+                    <Text><body><p>报警</p></body></Text>
+                  </AttributeList>
+                </MultilingualTextItem>
+              </ObjectList>
+            </MultilingualText>
+            <Animations>
+              <ColorAnimation>
+                <Dynamization>
+                  <TagName>Template_LMP_Alarm_Tag</TagName>
+                </Dynamization>
+                <Range Value="0">
+                  <FillColor>58,66,80</FillColor>
+                </Range>
+                <Range Value="1">
+                  <FillColor>226,85,99</FillColor>
+                </Range>
+              </ColorAnimation>
+              <FlashAnimation>
+                <Dynamization>
+                  <TagName>Template_LMP_Alarm_Tag</TagName>
+                </Dynamization>
+                <Range Value="1">
+                  <Flashing>Yes</Flashing>
+                </Range>
+              </FlashAnimation>
+            </Animations>
+          </Hmi.Screen.Circle>
+
+          <!-- ===== Template Text ===== -->
+          <Hmi.Screen.TextField ID="601">
+            <AttributeList>
+              <ObjectName>TXT_Template</ObjectName>
+              <Left>100</Left>
+              <Top>300</Top>
+              <Width>200</Width>
+              <Height>40</Height>
+              <FontSize>16</FontSize>
+              <Bold>false</Bold>
+              <ForeColor>230,237,243</ForeColor>
+            </AttributeList>
+            <MultilingualText ID="701" CompositionName="Text">
+              <ObjectList>
+                <MultilingualTextItem ID="702" CompositionName="Items">
+                  <AttributeList>
+                    <Culture>zh-CN</Culture>
+                    <Text><body><p>文本</p></body></Text>
+                  </AttributeList>
+                </MultilingualTextItem>
+              </ObjectList>
+            </MultilingualText>
+          </Hmi.Screen.TextField>
+
+        </ObjectList>
+      </SW.Screen>
+    </SW.ScreenFolder>
+  </SW.Blocks>
+</Document>

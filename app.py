@@ -458,6 +458,80 @@ def build_template_xml():
     })
 
 
+# --------------------------------------------------------------------------
+# V4.0 API — 模板原型管线生成
+# --------------------------------------------------------------------------
+
+@app.route("/api/build/template-v4", methods=["POST"])
+def build_template_v4():
+    """V4.0 模板原型管线：IR + 模板 XML → 克隆控件 + 变量替换 + 导入前验证。
+
+    请求 JSON:
+        {
+            "ir": { ... },                          // HMI IR（旧格式或 V2 project）
+            "template_xml_path": "/path/to/template.xml",  // 可选
+            "template_xml": "<raw_xml_string>",             // 可选（直接提供 XML）
+            "options": { ... }
+        }
+
+    返回 V4.0 完整诊断:
+        {
+            "ok": bool, "xml": str,
+            "diagnostics": {
+                "template_analyzed": { buttons, indicators, total },
+                "prototype_matched": [{ item_id, prototype_id, ... }],
+                "pre_import_validated": { errors, warnings }
+            }
+        }
+    """
+    body = request.get_json(force=True)
+    ir_data = body.get("ir")
+    if not ir_data:
+        return jsonify({"ok": False, "error": "缺少 ir 数据"}), 400
+
+    # 模板 XML 来源
+    template_xml = body.get("template_xml", "")
+    template_xml_path = body.get("template_xml_path", "")
+
+    if not template_xml:
+        if not template_xml_path:
+            cfg = cfgm.load_config()
+            template_xml_path = cfg.get("openness", {}).get("classic_template", {}).get("template_xml_path", "")
+        if template_xml_path and os.path.exists(template_xml_path):
+            with open(template_xml_path, "r", encoding="utf-8") as f:
+                template_xml = f.read()
+
+    if not template_xml:
+        return jsonify({"ok": False, "error": "未提供模板 XML，请先导出模板画面"}), 400
+
+    # IR 校验
+    try:
+        ir = validate_ir(ir_data)
+    except (IRValidationError, ValueError) as e:
+        return jsonify({"ok": False, "error": f"IR 校验失败: {e}"}), 400
+
+    # V4.0 模板管线
+    from backend.template_xml_generator import generate_from_template_v4
+    result = generate_from_template_v4(ir, template_xml, body.get("options"))
+
+    # 落盘（成功时）
+    if result["ok"] and result["xml"]:
+        cfg = cfgm.load_config()
+        gen_dir = cfg.get("openness", {}).get("classic_template", {}).get(
+            "generated_xml_dir", "exports/generated_from_template")
+        if not os.path.isabs(gen_dir):
+            gen_dir = os.path.join(BASE_DIR, gen_dir)
+        os.makedirs(gen_dir, exist_ok=True)
+
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        xml_path = os.path.join(gen_dir, f"{ir['meta']['screen_name']}_v4_{ts}.xml")
+        with open(xml_path, "w", encoding="utf-8") as f:
+            f.write(result["xml"])
+        result["xml_path"] = xml_path
+
+    return jsonify(result)
+
+
 @app.route("/api/openness/import", methods=["POST"])
 def openness_import():
     """导入画面到博途。支持旧 XML 路径模式和新 IR + mode 模式。"""
@@ -667,6 +741,64 @@ def hmi_validate():
     svc = DeploymentService()
     result = svc.validate(project)
     return jsonify(result)
+
+
+# --------------------------------------------------------------------------
+# V4.0 API — 生成摘要（understanding + tags + bindings + deployment）
+# --------------------------------------------------------------------------
+
+@app.route("/api/hmi/summary", methods=["POST"])
+def hmi_summary():
+    """生成完整摘要：AI 理解结果、变量表、控件绑定、部署结果。
+
+    请求 JSON:
+        {
+            "project": { "schema_version": "2.0", ... },   // HmiProjectSpec
+            "deployment_result": { ... }                     // 可选，部署结果
+        }
+
+    返回结构:
+        {
+            "ok": true,
+            "summary": {
+                "understanding": { screen_count, items_count, button_count, ... },
+                "tags": [{ name, data_type, direction, address, ... }],
+                "bindings": [{ item_id, item_name, template_ref, tag, ... }],
+                "deployment": { status, tags_imported, compile_success, ... }
+            }
+        }
+    """
+    try:
+        body = request.get_json(force=True)
+    except Exception:
+        return jsonify({"ok": False, "error": "请求体必须为 JSON"}), 400
+
+    from backend.generation_summary import build_generation_summary, build_legacy_summary
+    from backend.domain.ir_v2 import HmiProjectSpec
+
+    project_data = body.get("project")
+    deployment_result = body.get("deployment_result")
+
+    if not project_data:
+        return jsonify({"ok": False, "error": "缺少 project 字段"}), 400
+
+    # 支持 legacy IR dict
+    if isinstance(project_data, dict) and "schema_version" not in project_data:
+        from backend.variable_engine import enrich_to_v2
+        try:
+            project = enrich_to_v2(project_data)
+        except Exception as e:
+            # 回退到旧摘要
+            legacy_summary = build_legacy_summary(project_data)
+            return jsonify({"ok": True, "summary": legacy_summary, "mode": "legacy"})
+    else:
+        try:
+            project = HmiProjectSpec.model_validate(project_data)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"project 校验失败: {e}"}), 400
+
+    summary = build_generation_summary(project, deployment_result)
+    return jsonify({"ok": True, "summary": summary, "mode": "v2"})
 
 
 @app.route("/api/hmi/deploy", methods=["POST"])

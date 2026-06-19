@@ -154,3 +154,35 @@ class OpennessOperationKind(str, Enum):
     DESCRIPTION_ONLY = "description_only"
     TIA_MUTATION = "tia_mutation"
     TIA_QUERY = "tia_query"
+
+
+# ===================================================================
+# V4.0 新增枚举 — 模板绑定与语义增强
+# ===================================================================
+
+
+class ButtonBehavior(str, Enum):
+    """按钮行为模式。"""
+    MOMENTARY = "momentary"
+    TOGGLE = "toggle"
+    SET = "set"
+    RESET = "reset"
+    NAVIGATE = "navigate"
+    NONE = "none"
+
+
+class IndicatorMode(str, Enum):
+    """指示灯模式。"""
+    BOOL_COLOR = "bool_color"
+    BOOL_BLINK = "bool_blink"
+    MULTI_STATE = "multi_state"
+    ALARM = "alarm"
+    WARNING = "warning"
+    STATUS = "status"
+
+
+class TagDirection(str, Enum):
+    """变量方向（读/写）。"""
+    READ = "read"
+    WRITE = "write"
+    READ_WRITE = "read_write"

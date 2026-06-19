@@ -17,12 +17,15 @@ from typing import Any
 
 from .enums import (
     BindingKind,
+    ButtonBehavior,
     ConnectionKind,
     HmiFamily,
+    IndicatorMode,
     ScriptLanguage,
     SemanticEvent,
     SemanticActionType,
     ScreenItemType,
+    TagDirection,
     TagScope,
 )
 from .ir_v2 import (
@@ -378,6 +381,31 @@ class LegacyIrAdapter:
             if label_val:
                 text_dict.setdefault("zh-CN", str(label_val))
 
+            # V4.0: 自动推断 template_ref, behavior, indicator_mode
+            template_ref = None
+            behavior = None
+            indicator_mode = None
+            direction = TagDirection.READ_WRITE
+
+            if item_type == ScreenItemType.BUTTON:
+                tag_mode = obj.get("tag_mode", "momentary")
+                if tag_mode == "toggle":
+                    behavior = ButtonBehavior.TOGGLE
+                    template_ref = "BTN_TOGGLE_TEMPLATE"
+                    direction = TagDirection.READ_WRITE
+                elif tag_mode == "momentary":
+                    behavior = ButtonBehavior.MOMENTARY
+                    template_ref = "BTN_MOMENTARY_TEMPLATE"
+                    direction = TagDirection.WRITE
+                else:
+                    behavior = ButtonBehavior.MOMENTARY
+                    template_ref = "BTN_MOMENTARY_TEMPLATE"
+
+            elif item_type == ScreenItemType.INDICATOR:
+                indicator_mode = IndicatorMode.BOOL_COLOR
+                template_ref = "LMP_STATUS_TEMPLATE"
+                direction = TagDirection.READ
+
             result.append(ScreenItemSpec(
                 id=oid,
                 name=name,
@@ -388,6 +416,10 @@ class LegacyIrAdapter:
                 tag_binding=process_tag,
                 bindings=bindings,
                 events=events,
+                template_ref=template_ref,
+                behavior=behavior,
+                indicator_mode=indicator_mode,
+                metadata={} if not process_tag else {},
             ))
 
         return result
