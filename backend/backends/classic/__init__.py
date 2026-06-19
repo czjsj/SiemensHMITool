@@ -9,6 +9,11 @@ from .xml_id_registry import XmlIdRegistry
 from .link_resolver import LinkResolver
 from .classic_validator import ClassicValidator, ClassicValidationResult
 from .xml_fragment_catalog import XmlFragmentCatalog, CatalogManifest, ManifestEntry
+from .classic_screen_reference_rewriter import (
+    ClassicScreenReferenceRewriter,
+    ControlBindingMap,
+    rewrite_classic_screen,
+)
 
 __all__ = [
     "TagXmlBuilder",
@@ -23,4 +28,7 @@ __all__ = [
     "XmlFragmentCatalog",
     "CatalogManifest",
     "ManifestEntry",
+    "ClassicScreenReferenceRewriter",
+    "ControlBindingMap",
+    "rewrite_classic_screen",
 ]

@@ -326,7 +326,7 @@ class VariableEngine:
         if tag_name not in existing_tags:
             ts = TagSpec(
                 name=tag_name,
-                table="AI_Generated",
+                table="DefaultTagTable",
                 scope=TagScope.EXTERNAL if self.plc_prefix else TagScope.INTERNAL,
                 data_type="Bool",
                 address=self._make_address(tag_name),
@@ -409,7 +409,7 @@ class VariableEngine:
         if tag_name not in existing_tags:
             ts = TagSpec(
                 name=tag_name,
-                table="AI_Generated",
+                table="DefaultTagTable",
                 scope=TagScope.EXTERNAL if self.plc_prefix else TagScope.INTERNAL,
                 data_type="Bool",
                 address=self._make_address(tag_name),
@@ -469,7 +469,7 @@ class VariableEngine:
                 comment_parts.append(f"单位: {unit}")
             ts = TagSpec(
                 name=tag_name,
-                table="AI_Generated",
+                table="DefaultTagTable",
                 scope=TagScope.EXTERNAL if self.plc_prefix else TagScope.INTERNAL,
                 data_type=data_type,
                 address=self._make_address(tag_name),
@@ -492,7 +492,15 @@ class VariableEngine:
         existing_tags: dict,
         new_tags: list,
     ):
-        """为 SymbolicIOField 推断 TagSpec。"""
+        """为 SymbolicIOField 推断 TagSpec 和文本列表。
+
+        每个 SymbolicIOField 自动生成:
+          - 一个 Int 类型 HMI tag
+          - 一个 TextList（名称: {tag_name}_TextList）
+          - 默认条目可由 item.properties["text_list_entries"] 覆盖
+
+        如果未创建文本列表，标记降级警告。
+        """
         tag_name = self._make_tag_name(oid, SYMBOLIC_IOFIELD_PREFIX, existing_tags)
 
         existing_pt = (item.tag_binding or "").strip()
@@ -501,17 +509,29 @@ class VariableEngine:
         else:
             item.tag_binding = tag_name
 
+        # 文本列表名称 — 每个 SIO 独立
+        text_list_name = item.properties.get("text_list") or f"{tag_name}_TextList"
+        item.properties["text_list"] = text_list_name
+
+        # 文本列表条目（默认或自定义）
+        if "text_list_entries" not in item.properties:
+            item.properties["text_list_entries"] = [
+                (0, "停止"),
+                (1, "手动"),
+                (2, "自动"),
+            ]
+
         if tag_name not in existing_tags:
             ts = TagSpec(
                 name=tag_name,
-                table="AI_Generated",
+                table="DefaultTagTable",
                 scope=TagScope.EXTERNAL if self.plc_prefix else TagScope.INTERNAL,
                 data_type="Int",
                 address=self._make_address(tag_name),
                 comment={
                     "zh-CN": (
                         f"枚举选择 — {item.text.get('zh-CN', oid)} "
-                        f"(关联文本列表: {item.properties.get('text_list', '')})"
+                        f"(关联文本列表: {text_list_name})"
                     ),
                 },
             )

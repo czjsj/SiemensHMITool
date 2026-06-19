@@ -23,8 +23,18 @@ class VerificationService:
 
     def verify_full(
         self, spec: HmiProjectSpec, object_query_result: dict, connected: bool = False,
+        reverse_export_xmls: list[dict] | None = None,
+        template_tag_names: set[str] | None = None,
+        binding_map: dict[str, dict] | None = None,
     ) -> VerificationResult:
-        """完整语义验证。connected=False 时返回失败。"""
+        """完整语义验证。connected=False 时返回失败。
+
+        V3.2 增强:
+          - verify_button_events: 比较按钮事件变量
+          - verify_dynamizations: 比较动态化变量
+          - verify_no_template_references: 反向导出模板残留检查
+          - verify_tag_tables: 变量表成员验证
+        """
         if not connected:
             return VerificationResult(
                 success=False,
@@ -39,8 +49,14 @@ class VerificationService:
         found_bindings = object_query_result.get("bindings", [])
         found_scripts = object_query_result.get("scripts", [])
 
+        diags: list[Diagnostic] = []
+
         # 语义验证每个 tag
         tag_result = self._verify_tags_semantic(spec.tags, found_tags)
+
+        # V3.2: 验证变量表成员
+        tag_table_diags = self._verify_tag_tables(spec.tags, found_tags)
+        diags.extend(tag_table_diags)
 
         # 语义验证每个 screen
         screen_diags: list[Diagnostic] = []
@@ -69,11 +85,28 @@ class VerificationService:
         # 语义验证 events
         event_result = self._verify_events_semantic(spec, found_events)
 
+        # V3.2: 按钮事件变量验证
+        if binding_map:
+            button_event_diags = self._verify_button_events(spec, found_events, binding_map, found_tags)
+            diags.extend(button_event_diags)
+
         # 语义验证 bindings
         binding_result = self._verify_bindings_semantic(spec, found_bindings)
 
+        # V3.2: 动态化变量验证
+        if binding_map:
+            dynamization_diags = self._verify_dynamizations(spec, found_bindings, binding_map, found_tags)
+            diags.extend(dynamization_diags)
+
         # 语义验证 scripts
         script_result = self._verify_scripts_semantic(spec.scripts, found_scripts)
+
+        # V3.2: 反向导出模板残留检查
+        if reverse_export_xmls and template_tag_names:
+            reverse_export_diags = self._verify_no_template_references(
+                reverse_export_xmls, template_tag_names,
+            )
+            diags.extend(reverse_export_diags)
 
         compile_data = object_query_result.get("compile", {})
         compile_result = CompileResult(
@@ -85,6 +118,7 @@ class VerificationService:
         all_ok = (
             tag_result.failed == []
             and all(d.severity != DiagnosticSeverity.ERROR for d in screen_diags)
+            and all(d.severity != DiagnosticSeverity.ERROR for d in diags)
             and event_result.failed == []
             and binding_result.failed == []
             and compile_result.errors == 0
@@ -195,6 +229,213 @@ class VerificationService:
             if found.get("language") != script.language.value:
                 failed.append(f"{script.name} (language mismatch)")
         return ObjectCountSummary(expected=len(scripts), found=len(found_scripts), failed=failed)
+
+    # ---- V3.2 语义验证增强方法 ----
+
+    def _verify_tag_tables(
+        self, tags: list[TagSpec], found_tags: list[dict],
+    ) -> list[Diagnostic]:
+        """验证变量是否正确位于 DefaultTagTable 或指定变量表中。
+
+        返回诊断列表；空列表表示通过。
+        """
+        diags: list[Diagnostic] = []
+        found_names = {t.get("name", ""): t for t in found_tags}
+
+        for tag in tags:
+            found = found_names.get(tag.name)
+            if found is None:
+                continue  # 已在 _verify_tags_semantic 中报告
+
+            table_name = found.get("table_name", "")
+            is_default = found.get("is_default_table", True)
+
+            # 检查 tag 是否位于 DefaultTagTable
+            if tag.scope and tag.scope.value == "external":
+                if not table_name:
+                    diags.append(Diagnostic(
+                        code=DiagnosticCodes.DEFAULT_TAG_TABLE_NOT_FOUND,
+                        severity=DiagnosticSeverity.WARNING,
+                        object_type="tag", object_name=tag.name,
+                        message=f"外部变量 '{tag.name}' 未关联变量表",
+                    ))
+            elif not is_default and table_name != "DefaultTagTable":
+                diags.append(Diagnostic(
+                    code=DiagnosticCodes.VERIFY_TAG_MISSING,
+                    severity=DiagnosticSeverity.WARNING,
+                    object_type="tag", object_name=tag.name,
+                    message=f"变量 '{tag.name}' 位于 '{table_name}'，不在 DefaultTagTable",
+                ))
+
+        return diags
+
+    def _verify_button_events(
+        self,
+        spec: HmiProjectSpec,
+        found_events: list[dict],
+        binding_map: dict[str, dict],
+        found_tags: list[dict],
+    ) -> list[Diagnostic]:
+        """验证按钮 Press/Release/Click 事件引用正确的项目变量。
+
+        比较 expected_button_tag == actual_button_tag。
+        """
+        diags: list[Diagnostic] = []
+        found_tag_names = {t.get("name", "") for t in found_tags}
+
+        for screen in spec.screens:
+            for item in screen.items:
+                binding = binding_map.get(item.id, {})
+                expected_tag = binding.get("tag_name", "")
+                if not expected_tag:
+                    continue
+
+                for ev in item.events:
+                    ev_name = ev.event.value if hasattr(ev.event, "value") else str(ev.event)
+                    # 查找匹配的 found event
+                    matching = [
+                        f for f in found_events
+                        if f.get("item_id") == item.id
+                        and f.get("event") == ev_name
+                    ]
+                    for found_ev in matching:
+                        actual_tag = found_ev.get("tag", "")
+                        if actual_tag and actual_tag != expected_tag:
+                            diags.append(Diagnostic(
+                                code=DiagnosticCodes.BUTTON_EVENT_TAG_MISMATCH,
+                                severity=DiagnosticSeverity.ERROR,
+                                phase="P80_VERIFY",
+                                object_type="button_event",
+                                object_name=f"{item.id}.{ev_name}",
+                                message=(
+                                    f"按钮事件变量不匹配: "
+                                    f"expected '{expected_tag}', got '{actual_tag}'"
+                                ),
+                            ))
+                        elif actual_tag and actual_tag not in found_tag_names:
+                            diags.append(Diagnostic(
+                                code=DiagnosticCodes.IMPORTED_TAG_NOT_FOUND,
+                                severity=DiagnosticSeverity.ERROR,
+                                phase="P80_VERIFY",
+                                object_type="button_event",
+                                object_name=f"{item.id}.{ev_name}",
+                                message=f"按钮事件引用变量 '{actual_tag}' 未在变量表中找到",
+                            ))
+
+        return diags
+
+    def _verify_dynamizations(
+        self,
+        spec: HmiProjectSpec,
+        found_bindings: list[dict],
+        binding_map: dict[str, dict],
+        found_tags: list[dict],
+    ) -> list[Diagnostic]:
+        """验证动态化（颜色、可见性）引用正确的项目变量。
+
+        比较 expected_dynamic_tag == actual_dynamic_tag。
+        """
+        diags: list[Diagnostic] = []
+        found_tag_names = {t.get("name", "") for t in found_tags}
+
+        for screen in spec.screens:
+            for item in screen.items:
+                binding = binding_map.get(item.id, {})
+                expected_tag = binding.get("tag_name", "")
+                if not expected_tag:
+                    continue
+
+                for b in item.bindings:
+                    source_tag = getattr(b, "source_tag", "") or ""
+                    prop = getattr(b, "property", "") or ""
+
+                    matching = [
+                        f for f in found_bindings
+                        if f.get("item_id") == item.id
+                        and f.get("property") == prop
+                    ]
+                    for found_b in matching:
+                        actual_tag = found_b.get("source_tag", "")
+                        if actual_tag and actual_tag != expected_tag:
+                            diags.append(Diagnostic(
+                                code=DiagnosticCodes.DYNAMIZATION_TAG_MISMATCH,
+                                severity=DiagnosticSeverity.ERROR,
+                                phase="P80_VERIFY",
+                                object_type="dynamization",
+                                object_name=f"{item.id}.{prop}",
+                                message=(
+                                    f"动态化变量不匹配: "
+                                    f"expected '{expected_tag}', got '{actual_tag}'"
+                                ),
+                            ))
+
+        return diags
+
+    def _verify_no_template_references(
+        self,
+        reverse_export_xmls: list[dict],
+        template_tag_names: set[str],
+    ) -> list[Diagnostic]:
+        """检查反向导出 XML 中是否存在模板变量引用残留。
+
+        只要存在模板变量，部署结果必须为 VERIFICATION_FAILED。
+        """
+        diags: list[Diagnostic] = []
+
+        for export in reverse_export_xmls:
+            screen_name = export.get("screen_name", "unknown")
+            xml_text = export.get("xml", "")
+            if not xml_text:
+                continue
+
+            import re
+            for tpl_name in template_tag_names:
+                # 使用正则检查，但不匹配 ObjectName 等控件名称
+                pattern = rf'<Name>{re.escape(tpl_name)}</Name>'
+                if re.search(pattern, xml_text):
+                    diags.append(Diagnostic(
+                        code=DiagnosticCodes.REVERSE_EXPORT_TEMPLATE_REFERENCE_REMAINS,
+                        severity=DiagnosticSeverity.ERROR,
+                        phase="P80_VERIFY",
+                        object_type="reverse_export",
+                        object_name=screen_name,
+                        message=(
+                            f"反向导出画面 '{screen_name}' 中仍残留模板变量引用 "
+                            f"'{tpl_name}'"
+                        ),
+                    ))
+
+            # 也检查 ProcessTag 中的模板变量
+            for tpl_name in template_tag_names:
+                pattern = rf'<ProcessTag>{re.escape(tpl_name)}</ProcessTag>'
+                if re.search(pattern, xml_text):
+                    diags.append(Diagnostic(
+                        code=DiagnosticCodes.REVERSE_EXPORT_TEMPLATE_REFERENCE_REMAINS,
+                        severity=DiagnosticSeverity.ERROR,
+                        phase="P80_VERIFY",
+                        object_type="reverse_export",
+                        object_name=screen_name,
+                        message=(
+                            f"反向导出画面 '{screen_name}' ProcessTag 仍引用模板变量 "
+                            f"'{tpl_name}'"
+                        ),
+                    ))
+
+        return diags
+
+    def verify_compile_result(self, compile_data: dict) -> CompileResult:
+        """验证编译结果 — ErrorCount 必须为 0。"""
+        errors = compile_data.get("errors", -1)
+        warnings = compile_data.get("warnings", -1)
+        messages = compile_data.get("messages", [])
+
+        if errors != 0:
+            messages.append({
+                "severity": "Error",
+                "description": f"Compile ErrorCount={errors}, must be 0 for DEPLOYED status",
+            })
+
+        return CompileResult(errors=errors, warnings=warnings, messages=messages)
 
     # ---- 旧兼容方法 ----
 

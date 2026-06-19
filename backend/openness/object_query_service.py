@@ -9,10 +9,13 @@ ObjectQueryService — 从 TIA 项目重新读取真实对象（只读，永无�
   4. 持久化 — 查询结果、编译消息、快照落盘为 JSON。
   5. 反向导出 — 可导出 Screens XML 用于对比验证。
 
-Classic 路径:
-  hmiSoftware.TagFolder.Tags
+Classic 路径 (V3.2 修复):
+  hmiSoftware.TagFolder.DefaultTagTable.Tags    ← 默认变量表
+  hmiSoftware.TagFolder.TagTables[i].Tags       ← 自定义变量表
   hmiSoftware.ScreenFolder.Screens
   hmiSoftware.ScriptFolder.Scripts
+
+  禁止: hmiSoftware.TagFolder.Tags (Classic 不支持此直接路径)
 
 Unified 路径:
   hmiSoftware.Tags       (直接集合)
@@ -102,8 +105,12 @@ class ObjectQueryService:
     ) -> list[dict[str, Any]]:
         """从 TIA 项目读取所有 HMI Tags。
 
-        Classic:  hmiSoftware.TagFolder.Tags
-        Unified:  hmiSoftware.Tags
+        Classic (V3.2 修复):
+          遍历 DefaultTagTable.Tags + 所有 TagTables[i].Tags
+          禁止: hmiSoftware.TagFolder.Tags (Classic 不支持此直接路径)
+
+        Unified:
+          hmiSoftware.Tags (直接集合)
         """
         tags: list[dict[str, Any]] = []
         if not self._clr_available or hmi_software is None:
@@ -113,24 +120,76 @@ class ObjectQueryService:
             if unified:
                 # Unified: direct collection
                 tags_collection = hmi_software.Tags
+                for tag in tags_collection:
+                    entry = self._read_tag_entry(tag, table_name="", is_default_table=True)
+                    tags.append(entry)
             else:
-                # Classic: TagFolder.Tags
-                tags_collection = hmi_software.TagFolder.Tags
-
-            for tag in tags_collection:
-                entry = self._read_tag_entry(tag)
-                tags.append(entry)
+                # Classic: 遍历 DefaultTagTable + 所有自定义 TagTables
+                tags.extend(self._query_classic_tags(hmi_software))
         except Exception:
             pass
 
         return tags
 
+    def _query_classic_tags(self, hmi_software) -> list[dict[str, Any]]:
+        """Classic 路径: 遍历 DefaultTagTable.Tags + TagTables[i].Tags。
+
+        禁止: hmiSoftware.TagFolder.Tags
+        """
+        result: list[dict[str, Any]] = []
+        visited_table_names: set[str] = set()
+
+        tag_folder = hmi_software.TagFolder
+
+        # 1. 默认变量表
+        default_table = tag_folder.DefaultTagTable
+        if default_table is not None:
+            table_name = "DefaultTagTable"
+            try:
+                for tag in default_table.Tags:
+                    entry = self._read_tag_entry(tag, table_name=table_name, is_default_table=True)
+                    result.append(entry)
+            except Exception:
+                pass
+            visited_table_names.add(table_name)
+
+        # 2. 自定义变量表
+        try:
+            for table in tag_folder.TagTables:
+                try:
+                    table_name = str(getattr(table, "Name", ""))
+                except Exception:
+                    table_name = ""
+
+                if table_name in visited_table_names:
+                    continue
+                visited_table_names.add(table_name)
+
+                try:
+                    for tag in table.Tags:
+                        entry = self._read_tag_entry(tag, table_name=table_name, is_default_table=False)
+                        result.append(entry)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        return result
+
     @staticmethod
-    def _read_tag_entry(tag) -> dict[str, Any]:
+    def _read_tag_entry(
+        tag, table_name: str = "", is_default_table: bool = True,
+    ) -> dict[str, Any]:
+        """读取单个 Tag 的快照条目。
+
+        V3.2: 新增 table_name 和 is_default_table 字段。
+        """
         entry: dict[str, Any] = {
             "name": str(getattr(tag, "Name", "")),
             "data_type": "", "connection": "",
             "scope": "internal", "controller_tag": "",
+            "table_name": table_name,
+            "is_default_table": is_default_table,
         }
         try:
             entry["data_type"] = str(getattr(tag, "DataType", ""))

@@ -73,6 +73,18 @@ class LinkResolver:
                     elem.text = self._tag_map[old]
                     count += 1
 
+        # LinkList/OpenLink 中的变量 Name 引用
+        # 结构: <LinkList><Tag TargetID="@OpenLink"><Name>xxx</Name></Tag></LinkList>
+        for elem in node.iter():
+            ctag = _local_tag(elem)
+            if ctag == "Tag" and elem.get("TargetID") == "@OpenLink":
+                for name_elem in elem:
+                    if _local_tag(name_elem) == "Name" and name_elem.text:
+                        old = name_elem.text.strip()
+                        if old in self._tag_map:
+                            name_elem.text = self._tag_map[old]
+                            count += 1
+
         return count
 
     def validate_links(self, root: ET.Element, symbol_table: dict[str, set[str]]) -> list[str]:

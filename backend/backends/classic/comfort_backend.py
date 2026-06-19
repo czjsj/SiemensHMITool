@@ -156,9 +156,16 @@ class ComfortBackend(HmiBackend):
         tags_created = sum(r.objects_created for r in step_results if r.step_key == "tags")
         screens_created = sum(r.objects_created for r in step_results if r.step_key == "screens")
         scripts_created = sum(r.objects_created for r in step_results if r.step_key == "scripts_resources")
-        compile_ok = any(r.step_key == "compile" and r.success for r in step_results)
+        compile_result = next((r for r in step_results if r.step_key == "compile"), None)
+        compile_ok = compile_result.success if compile_result else False
 
-        status = DeploymentStatus.DEPLOYED if all_ok and compile_ok else DeploymentStatus.FAILED
+        # V3.2: 编译 ErrorCount > 0 不得返回 DEPLOYED
+        if compile_ok:
+            status = DeploymentStatus.DEPLOYED
+        elif compile_result and not compile_result.success:
+            status = DeploymentStatus.COMPILE_FAILED
+        else:
+            status = DeploymentStatus.FAILED
 
         return DeploymentResult(
             success=all_ok and compile_ok,
@@ -235,7 +242,25 @@ class ComfortBackend(HmiBackend):
         # 语义验证
         from backend.services.verification_service import VerificationService
         verify_svc = VerificationService()
-        return verify_svc.verify_full(spec, snapshot, connected=True)
+
+        # V3.2: 构建 binding_map 用于语义验证
+        binding_map = {}
+        if spec:
+            for screen in spec.screens:
+                for item in screen.items:
+                    tag_name = item.tag_binding or item.id
+                    if tag_name not in self._common.TEMPLATE_TAG_NAMES:
+                        binding_map[item.id] = {
+                            "tag_name": tag_name,
+                            "control_type": item.type.value if hasattr(item.type, "value") else str(item.type),
+                        }
+
+        return verify_svc.verify_full(
+            spec, snapshot, connected=True,
+            reverse_export_xmls=rev_exports,
+            template_tag_names=self._common.TEMPLATE_TAG_NAMES,
+            binding_map=binding_map,
+        )
 
     # ---- XML 产物生成器（DESCRIPTION_ONLY，不调用 Siemens Openness） ----
 
