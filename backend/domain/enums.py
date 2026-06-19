@@ -131,3 +131,26 @@ class MissingDependencyPolicy(str, Enum):
     """缺失依赖策略。"""
     ERROR = "error"
     WARN_AND_SKIP = "warn_and_skip"
+
+
+class DeploymentStatus(str, Enum):
+    """部署状态机 — 严格区分描述生成与真实 TIA 部署。
+
+    只有真实 Openness 修改完成且编译无错误时，才能返回 DEPLOYED。
+    connected=True 不能自动代表部署成功。
+    """
+    DRY_RUN = "dry_run"
+    NOT_CONNECTED = "not_connected"
+    BLOCKED = "blocked"
+    DEPLOYING = "deploying"
+    DEPLOYED = "deployed"
+    FAILED = "failed"
+    VERIFICATION_FAILED = "verification_failed"
+    COMPILE_FAILED = "compile_failed"
+
+
+class OpennessOperationKind(str, Enum):
+    """Openness 操作分类 — 用于审计每条调用路径。"""
+    DESCRIPTION_ONLY = "description_only"
+    TIA_MUTATION = "tia_mutation"
+    TIA_QUERY = "tia_query"

@@ -20,6 +20,7 @@ from backend.domain.ir_v2 import (
 from backend.domain.enums import (
     HmiFamily, TagScope, ScreenItemType, BindingKind,
     SemanticEvent, SemanticActionType, ScriptLanguage, DiagnosticSeverity,
+    DeploymentStatus,
 )
 from backend.services.deployment_service import (
     DeploymentService, BackendFactory, RuntimeContext, StepLog,
@@ -92,46 +93,69 @@ class TestBackendFactory:
 # ── Part 3: execute() 边界 ──────────────────────────────────────────────
 
 class TestExecuteBoundary:
-    """区分 DRY_RUN vs NOT_CONNECTED vs 真实执行。"""
+    """V3.2 区分 DRY_RUN vs NOT_CONNECTED vs 真实执行。
 
-    def test_comfort_execute_no_connection_returns_failure(self):
+    状态机规则:
+      - dry_run=true: 不需要连接，计划验证通过 → DRY_RUN, success=True
+      - dry_run=false + 无连接: NOT_CONNECTED, success=False
+      - dry_run=false + 有连接 + 无 hmi_sw: FAILED, success=False
+      - 只有真实 TIA 修改完成 + 编译 Error=0: DEPLOYED
+    """
+
+    def test_comfort_dry_run_returns_dry_run_status(self):
+        """dry_run=true 不要求 TIA 连接，计划成功则 success=True。"""
         be = ComfortBackend()
         from backend.domain.deployment_plan import DeploymentPlan
         plan = DeploymentPlan(plan_id="test-1", target=TargetSpec(family=HmiFamily.COMFORT), dry_run=True)
-        result = be.execute(plan)  # no context → NOT_CONNECTED
-        assert result.success is False
-        assert any(d.code == "NOT_CONNECTED" for d in result.diagnostics)
+        result = be.execute(plan)
+        assert result.success is True, "dry_run should succeed without connection"
+        assert result.status == DeploymentStatus.DRY_RUN
 
-    def test_basic_execute_no_connection_returns_failure(self):
+    def test_basic_dry_run_returns_dry_run_status(self):
         be = BasicBackend()
         from backend.domain.deployment_plan import DeploymentPlan
         plan = DeploymentPlan(plan_id="test-2", target=TargetSpec(family=HmiFamily.BASIC), dry_run=True)
         result = be.execute(plan)
-        assert result.success is False
-        assert any(d.code == "NOT_CONNECTED" for d in result.diagnostics)
+        assert result.success is True
+        assert result.status == DeploymentStatus.DRY_RUN
 
-    def test_unified_execute_no_connection_returns_failure(self):
+    def test_unified_dry_run_returns_dry_run_status(self):
         be = UnifiedBackend()
         from backend.domain.deployment_plan import DeploymentPlan
         plan = DeploymentPlan(plan_id="test-3", target=TargetSpec(family=HmiFamily.UNIFIED), dry_run=True)
         result = be.execute(plan)
+        assert result.success is True
+        assert result.status == DeploymentStatus.DRY_RUN
+
+    def test_comfort_not_connected_without_dry_run(self):
+        """dry_run=false 且未连接时返回 NOT_CONNECTED。"""
+        be = ComfortBackend()
+        from backend.domain.deployment_plan import DeploymentPlan
+        plan = DeploymentPlan(plan_id="test-nc", target=TargetSpec(family=HmiFamily.COMFORT), dry_run=False)
+        result = be.execute(plan)  # no context → NOT_CONNECTED
         assert result.success is False
+        assert result.status == DeploymentStatus.NOT_CONNECTED
         assert any(d.code == "NOT_CONNECTED" for d in result.diagnostics)
 
-    def test_comfort_execute_with_connection_succeeds(self):
+    def test_execute_with_connection_but_no_hmi_sw_returns_failed(self):
+        """connected=True 但无 hmi_software 时无法定位目标设备 → FAILED。"""
         be = ComfortBackend()
         from backend.domain.deployment_plan import DeploymentPlan, DeploymentStep
-        plan = DeploymentPlan(plan_id="test-4", target=TargetSpec(family=HmiFamily.COMFORT), dry_run=False,
+        plan = DeploymentPlan(plan_id="test-fail", target=TargetSpec(family=HmiFamily.COMFORT), dry_run=False,
                               steps=[DeploymentStep(id="s1", phase="P30", operation="create_or_update", target_type="tag", target_name="X")])
         result = be.execute(plan, context={"connected": True, "openness_manager": object()})
-        assert result.success is True
+        assert result.success is False
+        assert result.status == DeploymentStatus.FAILED
+        assert any(d.code == "TIA_NOT_CONNECTED" for d in result.diagnostics)
 
-    def test_verify_no_connection_returns_failure(self):
+    def test_verify_no_connection_all_backends(self):
+        """所有三个后端在无连接时 verify 返回 success=False。"""
         for be in [ComfortBackend(), BasicBackend(), UnifiedBackend()]:
             result = be.verify(HmiProjectSpec(target=TargetSpec(family=HmiFamily.COMFORT)))
             assert result.success is False, f"{type(be).__name__} should fail when not connected"
 
-    def test_verify_with_connection_returns_success(self):
+    def test_verify_with_connection_but_no_hmi_sw_fails(self):
+        """connected=True 但无 hmi_sw 时 verify 返回失败。"""
         be = ComfortBackend()
         spec = HmiProjectSpec(
             target=TargetSpec(family=HmiFamily.COMFORT),
@@ -139,33 +163,7 @@ class TestExecuteBoundary:
             screens=[ScreenSpec(name="S1", width=800, height=480)],
         )
         result = be.verify(spec, context={"connected": True})
-        assert result.success is True
-        assert result.tags.found == 1
-
-    def test_comfort_execute_with_connection_succeeds(self):
-        be = ComfortBackend()
-        from backend.domain.deployment_plan import DeploymentPlan, DeploymentStep
-        plan = DeploymentPlan(plan_id="test-4", target=TargetSpec(family=HmiFamily.COMFORT), dry_run=False,
-                              steps=[DeploymentStep(id="s1", phase="P30", operation="create_or_update", target_type="tag", target_name="X")])
-        result = be.execute(plan, context={"connected": True, "openness_manager": object()})
-        assert result.success is True
-        assert result.tags_created == 1
-
-    def test_verify_no_connection_returns_failure(self):
-        for be in [ComfortBackend(), BasicBackend(), UnifiedBackend()]:
-            result = be.verify(HmiProjectSpec(target=TargetSpec(family=HmiFamily.COMFORT)))
-            assert result.success is False, f"{type(be).__name__} should fail when not connected"
-
-    def test_verify_with_connection_returns_success(self):
-        be = ComfortBackend()
-        spec = HmiProjectSpec(
-            target=TargetSpec(family=HmiFamily.COMFORT),
-            tags=[TagSpec(name="X", data_type="Bool")],
-            screens=[ScreenSpec(name="S1", width=800, height=480)],
-        )
-        result = be.verify(spec, context={"connected": True})
-        assert result.success is True
-        assert result.tags.found == 1
+        assert result.success is False  # no hmi_sw → can't query TIA objects
 
 
 # ── Part 2+3: DeploymentService 流水线 ──────────────────────────────────

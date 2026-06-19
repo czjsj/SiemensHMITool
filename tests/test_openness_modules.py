@@ -115,10 +115,11 @@ class TestExceptionMapper:
 class TestHmiCompiler:
     """HmiCompiler 测试（不依赖实际 HMI）。"""
 
-    def test_compile_no_hmi(self):
+    def test_compile_no_hmi_dry_mode(self):
+        """compile(None) 为 dry mode，不算失败。"""
         compiler = HmiCompiler()
         result = compiler.compile(None)
-        assert not result["ok"]
+        assert result["ok"] is True  # dry mode: no HMI → skip, not an error
         assert len(result["messages"]) > 0
 
     def test_syntax_check_placeholder(self):

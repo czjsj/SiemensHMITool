@@ -12,6 +12,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from .diagnostics import Diagnostic
+from .enums import DeploymentStatus
 
 
 class ObjectCountSummary(BaseModel):
@@ -62,6 +63,9 @@ class DeploymentResult(BaseModel):
     """部署结果 — API 返回给前端的结构化摘要。"""
 
     success: bool = Field(default=False, description="部署是否全部成功")
+    status: DeploymentStatus = Field(
+        default=DeploymentStatus.NOT_CONNECTED, description="部署状态机当前状态"
+    )
     plan_id: str = Field(default="", description="对应的部署计划 ID")
     backend: str = Field(default="", description="使用的后端名称")
 
@@ -87,3 +91,72 @@ class DeploymentResult(BaseModel):
 
     # 额外细节
     details: dict[str, Any] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# ActualProjectSnapshot — 从真实 TIA 项目查询得到的对象快照
+# ---------------------------------------------------------------------------
+
+
+class TagSnapshot(BaseModel):
+    """从 TIA 项目查询到的变量快照。"""
+    name: str = ""
+    data_type: str = ""
+    connection: str = ""
+    scope: str = "internal"
+    controller_tag: str = ""
+
+
+class ScreenItemSnapshot(BaseModel):
+    """从 TIA 项目查询到的控件快照。"""
+    name: str = ""
+    item_type: str = ""
+    x: int = 0
+    y: int = 0
+    width: int = 0
+    height: int = 0
+    properties: dict[str, Any] = Field(default_factory=dict)
+    dynamizations: list[dict[str, Any]] = Field(default_factory=list)
+    event_handlers: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ScreenSnapshot(BaseModel):
+    """从 TIA 项目查询到的画面快照。"""
+    name: str = ""
+    width: int = 0
+    height: int = 0
+    items: list[ScreenItemSnapshot] = Field(default_factory=list)
+
+
+class ScriptSnapshot(BaseModel):
+    """从 TIA 项目查询到的脚本快照。"""
+    name: str = ""
+    language: str = ""
+    body_length: int = 0
+
+
+class ActualProjectSnapshot(BaseModel):
+    """从真实 TIA 项目查询到的完整对象快照。
+
+    VerificationService 只能接受此类型数据作为 found 数据。
+    禁止用 expected spec 构造 found 数据。
+    """
+    tags: list[dict[str, Any]] = Field(default_factory=list)
+    screens: list[dict[str, Any]] = Field(default_factory=list)
+    events: list[dict[str, Any]] = Field(default_factory=list)
+    bindings: list[dict[str, Any]] = Field(default_factory=list)
+    scripts: list[dict[str, Any]] = Field(default_factory=list)
+    compile: dict[str, Any] = Field(default_factory=dict)
+    raw_tags: list[TagSnapshot] = Field(default_factory=list)
+    raw_screens: list[ScreenSnapshot] = Field(default_factory=list)
+    raw_scripts: list[ScriptSnapshot] = Field(default_factory=list)
+
+    def to_query_dict(self) -> dict[str, Any]:
+        return {
+            "tags": self.tags,
+            "screens": self.screens,
+            "events": self.events,
+            "bindings": self.bindings,
+            "scripts": self.scripts,
+            "compile": self.compile,
+        }

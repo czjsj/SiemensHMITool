@@ -4,7 +4,7 @@ import sys, os, pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.domain.ir_v2 import HmiProjectSpec, TargetSpec, ScreenSpec, ScreenItemSpec, GeometrySpec, TagSpec, EventSpec, ActionSpec, BindingSpec, ScriptSpec
-from backend.domain.enums import HmiFamily, TagScope, ScreenItemType, SemanticEvent, SemanticActionType, BindingKind
+from backend.domain.enums import HmiFamily, TagScope, ScreenItemType, SemanticEvent, SemanticActionType, BindingKind, DeploymentStatus
 from backend.domain.deployment_plan import DeploymentPlan
 from backend.domain.deployment_result import DeploymentResult, VerificationResult
 from backend.backends.classic.comfort_backend import ComfortBackend
@@ -52,13 +52,14 @@ class TestComfortBackend:
         assert isinstance(plan, DeploymentPlan)
         assert len(plan.steps) > 0
 
-    def test_execute(self):
+    def test_execute_dry_run(self):
+        """build_plan 生成的 plan.dry_run=True → execute 返回 DRY_RUN。"""
         be = ComfortBackend()
         spec = _make_motor_control_spec()
         plan = be.build_plan(spec)
         result = be.execute(plan, context={"connected": True})
         assert isinstance(result, DeploymentResult)
-        assert result.tags_created > 0
+        assert result.status == DeploymentStatus.DRY_RUN
 
     def test_verify(self):
         be = ComfortBackend()
@@ -107,7 +108,7 @@ class TestBasicBackend:
         plan = be.build_plan(spec)
         assert any("Basic" in d.message for d in plan.diagnostics)
 
-    def test_execute(self):
+    def test_execute_dry_run(self):
         be = BasicBackend()
         spec = _make_motor_control_spec()
         spec.target = TargetSpec(family=HmiFamily.BASIC)
@@ -115,6 +116,7 @@ class TestBasicBackend:
         result = be.execute(plan)
         assert isinstance(result, DeploymentResult)
         assert result.backend == "basic_classic"
+        assert result.status == DeploymentStatus.DRY_RUN
 
     def test_verify(self):
         be = BasicBackend()

@@ -10,6 +10,14 @@ source:
   verified: false
   verified_import: false
   verified_compile: false
+  # V3.2 强化证据字段
+  source_xml_sha256: ""
+  tia_version_full: ""
+  device_order_number: ""
+  verified_project_name: ""
+  verified_at: ""
+  compiler_error_count: -1
+  verification_evidence_path: ""
 fragments:
   screens.base_screen: V20/Comfort/TP1200/screens/base_screen.xmlfrag
   controls.button: V20/Comfort/TP1200/controls/button.xmlfrag

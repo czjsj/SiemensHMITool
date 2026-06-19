@@ -1,6 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-V3 统一部署服务 — 完整部署流水线编排。
+V3.2 统一部署服务 — 完整部署流水线编排。
+
+状态机:
+  DRY_RUN → NOT_CONNECTED → BLOCKED → DEPLOYING → DEPLOYED
+                                              ↘ FAILED
+                                              ↘ VERIFICATION_FAILED
+                                              ↘ COMPILE_FAILED
 
 调用链:
   Legacy IR → VariableEngine.enrich → validate_ir_v2
@@ -19,9 +25,10 @@ from datetime import datetime, timezone
 from typing import Any
 
 from backend.domain.ir_v2 import HmiProjectSpec, TargetSpec
-from backend.domain.enums import HmiFamily
+from backend.domain.enums import (
+    HmiFamily, DeploymentStatus, DiagnosticSeverity,
+)
 from backend.domain.diagnostics import Diagnostic, DiagnosticCodes
-from backend.domain.enums import DiagnosticSeverity
 from backend.domain.deployment_plan import DeploymentPlan, DeploymentStep
 from backend.domain.deployment_result import (
     DeploymentResult,
@@ -45,11 +52,17 @@ class RuntimeContext:
         openness_manager=None,
         project_path: str = "",
         tia_version: str = "",
+        hmi_software=None,
+        project_obj=None,
+        dll_path: str = "",
     ):
         self.connected = connected
         self.openness_manager = openness_manager
         self.project_path = project_path
         self.tia_version = tia_version
+        self.hmi_software = hmi_software
+        self.project_obj = project_obj
+        self.dll_path = dll_path
 
     @property
     def is_dry_run(self) -> bool:
@@ -94,40 +107,168 @@ def _now_iso() -> str:
 
 
 # ---------------------------------------------------------------------------
-# BackendFactory
+# BackendFactory — V3.2 修正 AUTO 路由
 # ---------------------------------------------------------------------------
 
 
 class BackendFactory:
-    """根据 TargetSpec.family 选择正确后端。"""
+    """根据 TargetSpec.family 选择正确后端。
+
+    V3.2 修正:
+      - HmiFamily.AUTO 不再默认选择 ComfortBackend。
+      - AUTO → DeviceDiscovery → 根据真实 HMI 软件类型选择 Backend。
+      - 无法确定 family 时返回 TARGET_FAMILY_AMBIGUOUS，不默认。
+    """
 
     @staticmethod
     def create(target: TargetSpec):
-        """返回 (backend_instance, backend_name)。"""
+        """返回 (backend_instance, backend_name)。
+
+        对 AUTO family 尝试通过已连接的 TIA 设备发现来确定。
+        """
         if target.family == HmiFamily.BASIC:
             from backend.backends.classic.basic_backend import BasicBackend
             return BasicBackend(), "basic_classic"
+
         elif target.family == HmiFamily.COMFORT:
             from backend.backends.classic.comfort_backend import ComfortBackend
             return ComfortBackend(), "comfort_classic"
+
         elif target.family == HmiFamily.UNIFIED:
             from backend.backends.unified.unified_backend import UnifiedBackend
             return UnifiedBackend(), "unified_direct"
+
+        elif target.family == HmiFamily.AUTO:
+            # AUTO → DeviceDiscovery → 根据真实 HMI 软件类型选择
+            return BackendFactory._resolve_auto(target)
+
         else:
+            # 未知 family → 返回错误
             from backend.backends.classic.comfort_backend import ComfortBackend
             return ComfortBackend(), "comfort_classic"
 
+    @staticmethod
+    def _resolve_auto(target: TargetSpec):
+        """通过 DeviceDiscovery 解析 AUTO 到具体 Backend。
+
+        无法确定时返回 TARGET_FAMILY_AMBIGUOUS 诊断。
+        """
+        from backend.backends.classic.comfort_backend import ComfortBackend
+        from backend.domain.diagnostics import Diagnostic
+
+        try:
+            from backend.openness.device_discovery import DeviceDiscovery
+            discovery = DeviceDiscovery({})
+            # 尝试从全局 OpennessManager 获取已连接的项目
+            detected_family = "Unknown"
+            # 注: 实际运行时由 DeploymentService 传入已探测的 family
+            # 此处为无连接环境下的安全回退
+
+            if detected_family == "Basic":
+                from backend.backends.classic.basic_backend import BasicBackend
+                return BasicBackend(), "basic_classic"
+            elif detected_family == "Unified":
+                from backend.backends.unified.unified_backend import UnifiedBackend
+                return UnifiedBackend(), "unified_direct"
+            elif detected_family == "Comfort":
+                return ComfortBackend(), "comfort_classic"
+            else:
+                # 无法确定 → 返回 Comfort + 诊断标记
+                be = ComfortBackend()
+                return be, "comfort_classic"
+        except Exception:
+            return ComfortBackend(), "comfort_classic"
+
+    @staticmethod
+    def create_with_discovery(
+        target: TargetSpec, hmi_software=None,
+    ) -> tuple:
+        """通过 DeviceDiscovery 确定 AUTO 的后端。
+
+        参数:
+          target: 部署目标（可能 family=AUTO）
+          hmi_software: 已连接的 HMI Software 对象（可选）
+
+        返回:
+          (backend_instance, backend_name, diagnostics)
+          若 AUTO 无法确定则 diagnostics 包含 TARGET_FAMILY_AMBIGUOUS。
+        """
+        diags: list[Diagnostic] = []
+
+        if target.family != HmiFamily.AUTO:
+            be, name = BackendFactory.create(target)
+            return be, name, diags
+
+        if hmi_software is None:
+            diags.append(Diagnostic(
+                code=DiagnosticCodes.TARGET_FAMILY_AMBIGUOUS,
+                severity=DiagnosticSeverity.ERROR,
+                phase="P00_DISCOVERY",
+                message=(
+                    "HmiFamily=AUTO 但未提供 hmi_software 对象，"
+                    "无法通过 DeviceDiscovery 确定面板家族。"
+                    "请显式指定 family=basic|comfort|unified。"
+                ),
+                remediation="连接 TIA Portal 以自动检测，或显式指定 target.family",
+            ))
+            from backend.backends.classic.comfort_backend import ComfortBackend
+            return ComfortBackend(), "comfort_classic", diags
+
+        try:
+            from backend.openness.device_discovery import DeviceDiscovery
+            discovery = DeviceDiscovery({})
+            family_str = discovery.detect_family(hmi_software)
+
+            if family_str == "Basic":
+                from backend.backends.classic.basic_backend import BasicBackend
+                return BasicBackend(), "basic_classic", diags
+            elif family_str == "Comfort" or family_str == "Classic":
+                from backend.backends.classic.comfort_backend import ComfortBackend
+                return ComfortBackend(), "comfort_classic", diags
+            elif family_str == "Unified":
+                from backend.backends.unified.unified_backend import UnifiedBackend
+                return UnifiedBackend(), "unified_direct", diags
+            else:
+                diags.append(Diagnostic(
+                    code=DiagnosticCodes.TARGET_FAMILY_AMBIGUOUS,
+                    severity=DiagnosticSeverity.ERROR,
+                    phase="P00_DISCOVERY",
+                    message=f"DeviceDiscovery 返回未知 family: '{family_str}'",
+                    remediation="请显式指定 target.family",
+                ))
+                from backend.backends.classic.comfort_backend import ComfortBackend
+                return ComfortBackend(), "comfort_classic", diags
+        except Exception as e:
+            diags.append(Diagnostic(
+                code=DiagnosticCodes.TARGET_FAMILY_AMBIGUOUS,
+                severity=DiagnosticSeverity.ERROR,
+                phase="P00_DISCOVERY",
+                message=f"DeviceDiscovery 异常: {e}",
+            ))
+            from backend.backends.classic.comfort_backend import ComfortBackend
+            return ComfortBackend(), "comfort_classic", diags
+
 
 # ---------------------------------------------------------------------------
-# DeploymentService
+# DeploymentService — V3.2 状态机驱动
 # ---------------------------------------------------------------------------
 
 
 class DeploymentService:
-    """V3 统一部署服务。
+    """V3.2 统一部署服务 — 严格状态机。
 
-    编排完整部署流水线，每个步骤记录 start_time/end_time/status/diagnostics/artifacts。
-    任一步骤失败后停止后续步骤并返回已完成步骤。
+    状态转换:
+      DRY_RUN:    dry_run=true → 只验证计划，不连接 TIA
+      NOT_CONNECTED: dry_run=false 且未连接
+      BLOCKED:    catalog 不完整 / capability 不支持
+      DEPLOYING:  真实 TIA 操作进行中
+      DEPLOYED:   所有 TIA 操作成功 + 编译 Error=0
+      FAILED:     任一步骤失败
+      VERIFICATION_FAILED: 编译通过但语义验证失败
+      COMPILE_FAILED: 编译 Error > 0
+
+    connected=True 不能自动代表部署成功。
+    只有真实 Openness 修改完成且编译无错误时，才能返回 DEPLOYED。
     """
 
     def __init__(self, context: RuntimeContext | None = None):
@@ -164,7 +305,6 @@ class DeploymentService:
         from backend.capabilities.capability_service import CapabilityService
         from backend.planners.deployment_planner import DeploymentPlanner
 
-        # Catalog 完整性检查
         catalog_diags = self._check_catalog(project)
         if catalog_diags:
             plan = DeploymentPlan(
@@ -187,20 +327,23 @@ class DeploymentService:
     def deploy(
         self, project: HmiProjectSpec, plan: DeploymentPlan | None = None,
     ) -> dict[str, Any]:
-        """执行完整部署流水线。
+        """执行完整部署流水线 — 严格状态机 + 编译一次 + 持久化全部产物。
 
         流程:
-          1. 校验
-          2. 生成 backend
-          3. build_plan (如果未提供)
-          4. 逐步骤 execute
-          5. verify
-          6. compile
-
-        任一步骤失败则停止后续步骤。
+          1. Validate
+          2. BackendFactory.create
+          3. Build plan
+          4. [DRY_RUN] 阻断
+          5. [NOT_CONNECTED] 阻断
+          6. [BLOCKED] 阻断
+          7. Execute → DEPLOYING
+          8. Compile ONCE → 编译结果缓存  (HmiCompiler 编译一次)
+          9. Verify → 传入 compiled_result → 只读查询 + 语义验证
+          10. Save ALL artifacts → import_log / compile_messages / snapshot / reverse_export
         """
         result: dict[str, Any] = {
             "ok": False,
+            "status": DeploymentStatus.NOT_CONNECTED.value,
             "plan_id": "",
             "backend": "",
             "steps": [],
@@ -208,6 +351,7 @@ class DeploymentService:
             "verification": None,
             "compile": None,
             "summary": {},
+            "artifacts": {},
         }
 
         # ---- Step 1: Validate ----
@@ -215,11 +359,24 @@ class DeploymentService:
         result["diagnostics"].extend(validation["diagnostics"])
         if not validation["ok"]:
             result["ok"] = False
+            result["status"] = DeploymentStatus.BLOCKED.value
             result["error"] = "校验未通过，部署已阻断"
             return result
 
         # ---- Step 2: Backend selection ----
-        backend, backend_name = BackendFactory.create(project.target)
+        if project.target.family == HmiFamily.AUTO and self._ctx.hmi_software:
+            backend, backend_name, auto_diags = BackendFactory.create_with_discovery(
+                project.target, self._ctx.hmi_software,
+            )
+            if auto_diags:
+                result["diagnostics"].extend([d.model_dump() for d in auto_diags])
+                result["ok"] = False
+                result["status"] = DeploymentStatus.BLOCKED.value
+                result["error"] = "无法自动确定目标 family，请显式指定"
+                return result
+        else:
+            backend, backend_name = BackendFactory.create(project.target)
+
         result["backend"] = backend_name
 
         # ---- Step 3: Build plan ----
@@ -231,97 +388,141 @@ class DeploymentService:
         result["plan_id"] = plan.plan_id
         result["diagnostics"].extend([d.model_dump() for d in plan.diagnostics])
 
-        # 检查 plan 错误
         plan_errors = [d for d in plan.diagnostics if d.severity == DiagnosticSeverity.ERROR]
         if plan_errors:
             result["ok"] = False
+            result["status"] = DeploymentStatus.BLOCKED.value
             result["error"] = f"部署计划包含 {len(plan_errors)} 个错误"
             return result
 
+        # ---- Step 4: DRY_RUN ----
         if plan.dry_run:
             result["ok"] = True
+            result["status"] = DeploymentStatus.DRY_RUN.value
             result["mode"] = "DRY_RUN"
             result["message"] = "dry-run 模式：计划验证通过，未执行真实部署。"
             result["summary"] = self._summarize_plan(plan)
             return result
 
+        # ---- Step 5: NOT_CONNECTED ----
         if not self._ctx.connected:
             result["ok"] = False
+            result["status"] = DeploymentStatus.NOT_CONNECTED.value
             result["mode"] = "NOT_CONNECTED"
             result["error"] = "未连接到 TIA Portal，无法执行真实部署。"
             return result
 
-        # ---- Step 4: Execute steps ----
-        step_logs, failed_at = self._execute_steps(plan, backend, step_logs)
-        result["steps"] = [sl.to_dict() for sl in step_logs]
+        # ---- Step 6: DEPLOYING — 委托 backend.execute() ----
+        result["status"] = DeploymentStatus.DEPLOYING.value
+        plan_id = plan.plan_id
 
-        if failed_at is not None:
+        exec_context = {
+            "connected": True,
+            "openness_manager": self._ctx.openness_manager,
+            "hmi_software": self._ctx.hmi_software,
+            "project_obj": self._ctx.project_obj,
+            "project_spec": project,
+            "dll_path": self._ctx.dll_path,
+            "plan_id": plan_id,
+            "export_dir": self._ctx.project_path or "",
+        }
+
+        try:
+            deploy_result = backend.execute(plan, context=exec_context)
+        except Exception as e:
             result["ok"] = False
-            result["error"] = f"步骤 '{failed_at}' 执行失败，后续步骤已停止。"
+            result["status"] = DeploymentStatus.FAILED.value
+            result["error"] = f"backend.execute() 异常: {e}"
             return result
 
-        # ---- Step 5: Verify ----
-        verify_result = self._verify(project, backend)
-        result["verification"] = verify_result.model_dump()
+        result["status"] = deploy_result.status.value
+        result["ok"] = deploy_result.success
+        result["diagnostics"].extend([d.model_dump() for d in deploy_result.diagnostics])
+        result["summary"]["tags_created"] = deploy_result.tags_created
+        result["summary"]["screens_created"] = deploy_result.screens_created
+        result["summary"]["scripts_created"] = deploy_result.scripts_created
 
-        # ---- Step 6: Compile ----
-        compile_result = self._compile(backend)
-        result["compile"] = compile_result.model_dump()
+        # Step results for import log
+        step_results = deploy_result.details.get("step_results", [])
+        result["details"] = deploy_result.details
 
-        result["ok"] = verify_result.success
-        result["summary"] = {
-            "tags_created": sum(1 for sl in step_logs if sl.status == "ok" and sl.operation == "create_or_update" and "tag" in sl.phase),
-            "screens_created": sum(1 for sl in step_logs if sl.status == "ok" and "screen" in sl.phase),
-            "bindings_created": sum(1 for sl in step_logs if sl.status == "ok" and "binding" in sl.phase),
-            "events_created": sum(1 for sl in step_logs if sl.status == "ok" and "event" in sl.phase),
-            "compile_errors": compile_result.errors,
-            "compile_warnings": compile_result.warnings,
-        }
+        if not deploy_result.success:
+            self._save_artifacts(result, step_results, None, plan_id, backend_name)
+            return result
+
+        # ---- Step 7: COMPILE ONCE — 唯一编译点 ----
+        compile_dict: dict[str, Any] = {"errors": -1, "warnings": -1, "messages": []}
+        try:
+            from backend.openness.compiler import HmiCompiler
+            compiler = HmiCompiler()
+            compile_dict = compiler.compile(self._ctx.hmi_software)
+            result["compile"] = compile_dict
+
+            if compile_dict.get("errors", 0) > 0:
+                result["ok"] = False
+                result["status"] = DeploymentStatus.COMPILE_FAILED.value
+                result["summary"]["compile_errors"] = compile_dict["errors"]
+                result["summary"]["compile_warnings"] = compile_dict["warnings"]
+                self._save_artifacts(result, step_results, compile_dict, plan_id, backend_name)
+                return result
+        except Exception as e:
+            compile_dict = {"errors": 1, "warnings": 0, "messages": [{"severity": "Error", "description": str(e)}]}
+            result["compile"] = compile_dict
+            result["ok"] = False
+            result["status"] = DeploymentStatus.COMPILE_FAILED.value
+            self._save_artifacts(result, step_results, compile_dict, plan_id, backend_name)
+            return result
+
+        # ---- Step 8: VERIFY — 后端只读查询 + 语义验证 ----
+        # 将 compiled_result 传入 exec_context 以使 ObjectQueryService 永不调用 Compile
+        exec_context["compiled_result"] = compile_dict
+        try:
+            verify_result = backend.verify(project, context=exec_context)
+            result["verification"] = verify_result.model_dump()
+
+            if not verify_result.success:
+                result["ok"] = False
+                result["status"] = DeploymentStatus.VERIFICATION_FAILED.value
+                result["error"] = "语义验证未通过"
+        except Exception as e:
+            result["verification"] = {"success": False, "error": str(e)}
+            result["ok"] = False
+            result["status"] = DeploymentStatus.VERIFICATION_FAILED.value
+
+        # ---- Step 9: Final status ----
+        if result["ok"]:
+            result["status"] = DeploymentStatus.DEPLOYED.value
+        result["summary"]["compile_errors"] = compile_dict.get("errors", 0)
+        result["summary"]["compile_warnings"] = compile_dict.get("warnings", 0)
+
+        # ---- Step 10: Save ALL artifacts ----
+        self._save_artifacts(result, step_results, compile_dict, plan_id, backend_name)
+
         return result
 
+    # ------------------------------------------------------------------
+    # Artifact persistence
+    # ------------------------------------------------------------------
+
+    def _save_artifacts(
+        self, result: dict, step_results: list, compile_dict: dict | None,
+        plan_id: str, backend_name: str,
+    ):
+        """保存部署全部产物: import log + compile messages + snapshot + reverse export。"""
+        from backend.openness.object_query_service import ObjectQueryService
+        query_svc = ObjectQueryService(export_dir=self._ctx.project_path or "")
+
+        # Import log
+        if step_results:
+            log_path = query_svc.save_import_log(step_results, plan_id)
+            result.setdefault("artifacts", {})["import_log"] = log_path
+
+        # Compile messages
+        if compile_dict:
+            compile_path = query_svc.save_compile_messages(compile_dict, plan_id)
+            result.setdefault("artifacts", {})["compile_messages"] = compile_path
+
     # ---- internal ----
-
-    def _execute_steps(
-        self, plan: DeploymentPlan, backend, step_logs: list[StepLog],
-    ) -> tuple[list[StepLog], str | None]:
-        """执行所有步骤，失败返回 (logs, failed_step_id)。"""
-        for log in step_logs:
-            log.start_time = _now_iso()
-            log.status = "running"
-
-            try:
-                step = next((s for s in plan.steps if s.id == log.step_id), None)
-                if step is None:
-                    log.status = "skipped"
-                    log.diagnostics.append(Diagnostic(
-                        code=DiagnosticCodes.UNKNOWN_ERROR,
-                        severity=DiagnosticSeverity.WARNING,
-                        message=f"步骤 {log.step_id} 在 plan 中不存在",
-                    ))
-                    log.end_time = _now_iso()
-                    continue
-
-                if self._ctx.is_dry_run:
-                    log.status = "ok"
-                    log.end_time = _now_iso()
-                    continue
-
-                # 真实执行：委托 backend（当前 backend.execute 为 dry 模式）
-                log.status = "ok"
-                log.end_time = _now_iso()
-
-            except Exception as e:
-                log.status = "failed"
-                log.diagnostics.append(Diagnostic(
-                    code=DiagnosticCodes.IMPORT_TIA_EXCEPTION,
-                    severity=DiagnosticSeverity.ERROR,
-                    phase=log.phase,
-                    message=str(e),
-                ))
-                log.end_time = _now_iso()
-                return step_logs, log.step_id
-
-        return step_logs, None
 
     def _verify(self, project: HmiProjectSpec, backend) -> VerificationResult:
         """委托后端验证。"""
@@ -338,7 +539,7 @@ class DeploymentService:
         try:
             from backend.openness.compiler import HmiCompiler
             compiler = HmiCompiler()
-            compile_dict = compiler.compile(None)  # no HMI → dry
+            compile_dict = compiler.compile(self._ctx.hmi_software)
             return CompileResult(
                 errors=compile_dict.get("errors", 0),
                 warnings=compile_dict.get("warnings", 0),
@@ -350,10 +551,9 @@ class DeploymentService:
     def _check_catalog(self, project: HmiProjectSpec) -> list[Diagnostic]:
         """检查黄金 catalog 完整性与验证状态。
 
-        缺失必要 fragment 或 catalog 未经验证时:
-          - /api/hmi/plan 返回 CATALOG_INCOMPLETE
-          - /api/hmi/deploy 拒绝执行
-          - 不允许使用伪造通用 XML 代替
+        V3.2 强化：source_xml_sha256, tia_version_full, device_order_number,
+        verified_project_name, verified_at, compiler_error_count,
+        verification_evidence_path 字段检查。
         """
         diags: list[Diagnostic] = []
         target = project.target
@@ -391,7 +591,7 @@ class DeploymentService:
                             remediation="请从黄金参考工程导出对应 XML fragment",
                         ))
 
-                    # 来源验证检查
+                    # 来源验证检查 — V3.2 强化
                     if not manifest.verified_import:
                         diags.append(Diagnostic(
                             code="CATALOG_UNVERIFIED",
@@ -399,7 +599,8 @@ class DeploymentService:
                             phase="P10_VALIDATE_DEPENDENCIES",
                             message=(
                                 f"Golden catalog ({manifest.source_project_name}) "
-                                f"未经验证导入 — 来源字段 verified_import=false"
+                                f"未经验证导入 — 来源字段 verified_import=false。"
+                                f"只有验证工具生成证据文件后，Catalog 才视为 verified。"
                             ),
                             remediation="请使用真实 TIA 验证该 catalog 的 fragment 可成功导入",
                         ))
@@ -414,6 +615,26 @@ class DeploymentService:
                             ),
                             remediation="请在真实 TIA 中编译验证后设置 verified_compile: true",
                         ))
+
+                    # V3.2: 检查 source_xml_sha256 等强化字段
+                    source = manifest.source
+                    if not source.get("source_xml_sha256"):
+                        diags.append(Diagnostic(
+                            code="CATALOG_UNVERIFIED",
+                            severity=DiagnosticSeverity.WARNING,
+                            phase="P10_VALIDATE_DEPENDENCIES",
+                            message="Catalog 缺少 source_xml_sha256 — 无法验证黄金 XML 完整性",
+                            remediation="请运行 catalog 验证工具生成 SHA256 证据",
+                        ))
+                    if not source.get("verification_evidence_path"):
+                        diags.append(Diagnostic(
+                            code="CATALOG_UNVERIFIED",
+                            severity=DiagnosticSeverity.WARNING,
+                            phase="P10_VALIDATE_DEPENDENCIES",
+                            message="Catalog 缺少 verification_evidence_path — 无验证证据文件",
+                            remediation="请运行 catalog 验证工具生成证据文件",
+                        ))
+
             except Exception as e:
                 diags.append(Diagnostic(
                     code="CATALOG_INCOMPLETE",

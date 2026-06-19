@@ -719,16 +719,36 @@ def hmi_deploy():
     # ---- Runtime 上下文 ----
     connected = False
     openness_mgr = None
+    hmi_sw = None
+    project_obj = None
+    dll_path = ""
     try:
         mgr = get_openness()
+        dll_path = mgr._cfg.get("dll_path", "") if hasattr(mgr, "_cfg") else ""
         if getattr(mgr, "_portal", None) is not None:
             connected = True
             openness_mgr = mgr
+            project_obj = getattr(mgr, "_project", None)
+            # 尝试定位 HMI software
+            try:
+                from backend.openness.device_discovery import DeviceDiscovery
+                discovery = DeviceDiscovery(mgr._cfg if hasattr(mgr, "_cfg") else {})
+                sw, _, _ = discovery.find_hmi_software(project_obj, getattr(mgr, "_tia", None))
+                hmi_sw = sw
+            except Exception:
+                pass
     except Exception:
         pass
 
     dry_run = options.get("dry_run", not connected)
-    ctx = RuntimeContext(connected=connected and not dry_run, openness_manager=openness_mgr)
+    ctx = RuntimeContext(
+        connected=connected and not dry_run,
+        openness_manager=openness_mgr,
+        tia_version=project.target.tia_version or "",
+        hmi_software=hmi_sw,
+        project_obj=project_obj,
+        dll_path=dll_path,
+    )
 
     svc = DeploymentService(ctx)
     result = svc.deploy(project)
@@ -760,17 +780,27 @@ def hmi_verify():
         return jsonify({"ok": False, "error": f"project 解析失败: {e}"}), 400
 
     connected = False
+    hmi_sw = None
     try:
         mgr = get_openness()
         if getattr(mgr, "_portal", None) is not None:
             connected = True
+            project_obj = getattr(mgr, "_project", None)
+            try:
+                from backend.openness.device_discovery import DeviceDiscovery
+                discovery = DeviceDiscovery(mgr._cfg if hasattr(mgr, "_cfg") else {})
+                sw, _, _ = discovery.find_hmi_software(project_obj, getattr(mgr, "_tia", None))
+                hmi_sw = sw
+            except Exception:
+                pass
     except Exception:
         pass
 
-    ctx = RuntimeContext(connected=connected, openness_manager=get_openness() if connected else None)
+    ctx = RuntimeContext(connected=connected, openness_manager=get_openness() if connected else None,
+                         hmi_software=hmi_sw)
     backend, _ = BackendFactory.create(project.target)
 
-    verify_result = backend.verify(project, context={"connected": connected})
+    verify_result = backend.verify(project, context={"connected": connected, "hmi_software": hmi_sw})
     return jsonify({
         "ok": verify_result.success,
         "verification": verify_result.model_dump(),
