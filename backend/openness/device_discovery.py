@@ -82,6 +82,8 @@ class DeviceDiscovery:
     ) -> str:
         """区分 Basic / Comfort / Unified。
 
+        V5.0: 增强设备型号模式匹配，添加 KTP/TP 系列检测。
+
         返回 "Basic" | "Comfort" | "Unified" | "Classic" | "Unknown"
         """
         sw_type_name = type(sw).__name__
@@ -118,7 +120,9 @@ class DeviceDiscovery:
         if "comfort" in cfg_low:
             return "Comfort"
 
-        # 从设备名/型号检测
+        # V5.0: 扩展设备型号检测 — 从设备名/型号/订单号识别
+        # Basic 面板型号: KTP400, KTP700, KTP900, KTP1200, TP700, TP900
+        # Comfort 面板型号: TP1200, TP1500, TP1900, TP2200
         parts = []
         for obj in (device, item, sw):
             if obj is None:
@@ -131,12 +135,89 @@ class DeviceDiscovery:
                 except Exception:
                     pass
         joined = " ".join(p for p in parts if p).lower()
-        if "basic" in joined or "ktp" in joined:
+
+        # V5.0: 精确型号匹配
+        basic_models = {"ktp400", "ktp700", "ktp900", "ktp1200",
+                        "tp700", "tp900",
+                        "basic panel", "ktp basic"}
+        comfort_models = {"tp1200", "tp1500", "tp1900", "tp2200",
+                          "comfort panel", "tp comfort"}
+
+        if any(m in joined for m in basic_models) or "basic" in joined or "ktp" in joined:
             return "Basic"
-        if "comfort" in joined:
+        if any(m in joined for m in comfort_models) or "comfort" in joined:
             return "Comfort"
 
+        logger.warning(
+            "detect_family: 无法区分 Basic/Comfort，返回 'Classic'。"
+            " 设备名: %s, 型号: %s",
+            getattr(device, "Name", "?"),
+            joined[:200] if joined else "N/A",
+        )
         return "Classic"
+
+    def resolve_family_with_fallback(
+        self, sw, device=None, item=None, config_type_hint: str | None = None,
+    ) -> str:
+        """增强的家族检测 — 带配置回退。
+
+        策略:
+          1. 调用 detect_family()
+          2. 如果结果是 "Unknown" 或 "Classic"，且提供了 config_type_hint，使用配置提示
+          3. 如果仍无法确定，记录详细诊断信息用于调试
+
+        参数:
+            sw: HMI 软件对象。
+            device: 设备对象（可选）。
+            item: 设备项对象（可选）。
+            config_type_hint: 配置中的 hmi_type 提示 ('basic', 'comfort', 'unified')。
+
+        返回:
+            "Basic" | "Comfort" | "Unified" | "Unknown"
+        """
+        family = self.detect_family(sw, device, item)
+
+        if family in ("Unknown", "Classic") and config_type_hint:
+            hint_lower = config_type_hint.lower()
+            if "basic" in hint_lower:
+                logger.info(
+                    "resolve_family_with_fallback: detect_family=%s，使用配置回退为 'Basic'",
+                    family,
+                )
+                return "Basic"
+            elif "comfort" in hint_lower:
+                logger.info(
+                    "resolve_family_with_fallback: detect_family=%s，使用配置回退为 'Comfort'",
+                    family,
+                )
+                return "Comfort"
+            elif "unified" in hint_lower:
+                logger.info(
+                    "resolve_family_with_fallback: detect_family=%s，使用配置回退为 'Unified'",
+                    family,
+                )
+                return "Unified"
+
+        if family == "Unknown":
+            # 记录设备信息用于调试
+            sw_info = {}
+            for obj, label in [(sw, "sw"), (device, "device"), (item, "item")]:
+                if obj is None:
+                    continue
+                for attr in dir(obj):
+                    if not attr.startswith("_"):
+                        try:
+                            val = getattr(obj, attr)
+                            if val is not None and not callable(val):
+                                sw_info[f"{label}.{attr}"] = str(val)[:100]
+                        except Exception:
+                            pass
+            logger.warning(
+                "resolve_family_with_fallback: HMI 家族检测失败。设备信息: %s",
+                sw_info,
+            )
+
+        return family
 
     def list_screens(self, hmi_software) -> list[str]:
         """列出 HMI 设备中已有画面名称。"""

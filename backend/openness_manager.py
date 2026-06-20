@@ -1832,6 +1832,11 @@ class OpennessManager:
         V4.1 修复：变量导入必须在画面导入之前。
         流程: normalize → validate → VariableEngine.generate → sync_tags → verify → import screen
 
+        V5.0 修复：
+          - 在进入任何 IR 处理之前，先检测 HMI family
+          - Unknown HMI family 立即返回 BLOCKED，不进入变量同步和画面导入
+          - 日志开头输出 detected_hmi_family、backend 选择等信息
+
         参数:
             ir: 校验后的 HMI 画面 IR。
             mode: 生成模式 — auto | unified_direct | classic_template_xml | simaticml。
@@ -1839,6 +1844,41 @@ class OpennessManager:
         返回:
             {"ok": True, "mode": "...", "hmi_type": "...", "screen_name": "...", ...}
         """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # V5.0: 在开始处理前检测 HMI family
+        caps = self.get_hmi_capabilities()
+        hmi_family = caps.get("hmi_family", "Unknown")
+        logger.info(
+            "使用模式: %s（HMI 类型: %s）",
+            mode, hmi_family,
+        )
+
+        # V5.0: Unknown HMI family — 立即 BLOCKED
+        if hmi_family == "Unknown":
+            logger.error(
+                "BLOCKED: HMI family 为 Unknown，无法进行变量同步和画面导入。"
+                "请配置 target_device_name、target_hmi_family 或 target_path。"
+            )
+            return {
+                "ok": False,
+                "blocked": True,
+                "mode": mode,
+                "hmi_type": "Unknown",
+                "screen_name": ir.get("meta", {}).get("screen_name", "Screen_1"),
+                "message": (
+                    "无法识别 HMI 设备类型 (Unknown)。"
+                    "请配置 target_device_name、target_hmi_family 或 target_path 后重试。"
+                ),
+                "remediation": (
+                    "请在配置中指定 hmi_defaults.hmi_type 为 'basic', 'comfort', 'unified'，"
+                    "或确保项目中存在可识别的 HMI 设备。"
+                ),
+                "warnings": caps.get("warnings", []),
+                "details": {"hmi_capabilities": caps},
+            }
+
         from .hmi_ir import validate_ir as _validate
         from .tag_binding_normalizer import (
             normalize_legacy_tag_bindings,

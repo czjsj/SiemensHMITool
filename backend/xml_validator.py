@@ -295,9 +295,9 @@ class XmlValidator:
     def _local_tag(elem: ET.Element) -> str:
         tag = elem.tag
         if "}" in tag:
-            return tag.rsplit("}", 1)[-1]
+            tag = tag.rsplit("}", 1)[-1]
         if "." in tag:
-            return tag.rsplit(".", 1)[-1]
+            tag = tag.rsplit(".", 1)[-1]
         return tag
 
     @staticmethod
@@ -327,3 +327,302 @@ class XmlValidator:
             if m:
                 return xml_content.count("\n", 0, m.start()) + 1
         return 1
+
+
+# ========================================================================
+# V5.0: XML 类别守卫 — 防止错误 XML 类型传入 Openness Import
+# ========================================================================
+
+def validate_xml_class_for_import_target(xml_path: str, target_kind: str):
+    """校验 XML 文件中的对象类别是否与导入目标匹配。
+
+    在调用 TagComposition.Import / Screen.Import / PLC Blocks.Import 之前
+    调用此函数，避免将错误类别的 XML 传给 Openness API。
+
+    参数:
+        xml_path: XML 文件路径。
+        target_kind: 导入目标类型，支持:
+            - 'hmi_tags':   HMI TagComposition / TagTable
+            - 'hmi_screen': HMI ScreenFolder
+            - 'plc_blocks': PLC Software Blocks
+
+    异常:
+        ValueError: 如果 XML 类别与目标不匹配，抛出带有 [TAG_XML_WRONG_CLASS]
+                    前缀的详细异常。
+
+    检测内容:
+        对于 'hmi_tags':
+          - 检查 XML 中是否包含 <SW.Blocks> 元素 → 拒绝
+          - 检查 XML 中是否包含 PLC 对象类型 (OB, FB, FC, DB) → 拒绝
+          - 只允许 SW.Tag, SW.TagTable, Hmi.Tag.* 等 HMI 标签相关类型
+        对于 'hmi_screen':
+          - 检查根对象是否为 Screen 相关类型
+        对于 'plc_blocks':
+          - 允许 SW.Blocks
+    """
+    import os
+
+    if not os.path.isfile(xml_path):
+        raise ValueError(f"[TAG_XML_WRONG_CLASS] XML 文件不存在: {xml_path}")
+
+    try:
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+    except ET.ParseError as e:
+        raise ValueError(f"[TAG_XML_WRONG_CLASS] XML 解析失败: {e}") from e
+
+    # 提取 XML 内容字符串用于正则检测
+    with open(xml_path, "r", encoding="utf-8-sig", errors="ignore") as f:
+        xml_content = f.read()
+
+    def _local(tag: str) -> str:
+        if "}" in tag:
+            tag = tag.rsplit("}", 1)[-1]
+        if "." in tag:
+            tag = tag.rsplit(".", 1)[-1]
+        return tag
+
+    def _has_plc_block_indicators(content: str) -> tuple[bool, str, int]:
+        """检测 XML 中是否包含 PLC 软件块指示器。返回 (found, type_name, line)。
+
+        自动跳过 XML 注释中的匹配，避免注释中的 SW.Blocks 引用导致误报。
+        """
+        plc_patterns = [
+            (r'<SW\.Blocks[>\s]', "SW.Blocks"),
+            (r'Class="Siemens\.Engineering\.SW\.Blocks"', "Siemens.Engineering.SW.Blocks"),
+            (r'<SW\.Blocks\b', "SW.Blocks"),
+            (r'Siemens\.Engineering\.SW\.Blocks', "Siemens.Engineering.SW.Blocks"),
+            (r'<OB\b[^>]*/>', "OB (Organization Block)"),
+            (r'<FB\b[^>]*/>', "FB (Function Block)"),
+            (r'<FC\b[^>]*/>', "FC (Function)"),
+            (r'<DB\b[^>]*/>', "DB (Data Block)"),
+        ]
+
+        # 逐行检测，跳过注释行中的匹配
+        lines = content.split("\n")
+        in_comment = False
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            # 检测注释边界
+            if stripped.startswith("<!--"):
+                in_comment = True
+            if in_comment:
+                if "-->" in stripped:
+                    in_comment = False
+                continue
+            # 不在注释中 → 正常检测
+            for pattern, type_name in plc_patterns:
+                if re.search(pattern, line):
+                    return True, type_name, i
+        return False, "", 0
+
+    def _has_hmi_tag_indicators(content: str) -> bool:
+        """检测 XML 中是否包含 HMI 标签元素。"""
+        hmi_patterns = [
+            r'<SW\.Tag\b',
+            r'<SW\.TagTable\b',
+            r'Hmi\.Tag\.',
+            r'<SW\.TextList\b',
+        ]
+        for pattern in hmi_patterns:
+            if re.search(pattern, content):
+                return True
+        return False
+
+    # 检查 Document 的 xmlns 命名空间
+    ns = root.get("xmlns", "")
+    root_local = _local(root.tag)
+
+    if root_local != "Document":
+        raise ValueError(
+            f"[TAG_XML_WRONG_CLASS] XML 根元素不是 Document: '{root_local}'"
+        )
+
+    if target_kind == "hmi_tags":
+        # 检查 PLC blocks 指示器
+        has_plc, plc_type, line_no = _has_plc_block_indicators(xml_content)
+        if has_plc:
+            # 提取 SW.Blocks 的 ID 属性
+            simatic_id = ""
+            m = re.search(r'<SW\.Blocks\s+ID="([^"]*)"', xml_content)
+            if m:
+                simatic_id = m.group(1)
+            raise ValueError(
+                f"[TAG_XML_WRONG_CLASS] 当前导入目标是 HMI TagComposition，"
+                f"但 XML 类型是 {plc_type}，请检查变量生成器和导入路径。\n"
+                f"  expected=HMI Tag XML\n"
+                f"  actual={plc_type}\n"
+                f"  target=Siemens.Engineering.Hmi.Tag.TagComposition.Import\n"
+                f"  failed_xml_path={xml_path}\n"
+                f"  line={line_no}\n"
+                f"  simatic_ml_id={simatic_id}"
+            )
+
+        # 检查是否包含任何 HMI tag 元素 — 如果没有且不是 PLC blocks，警告
+        if not _has_hmi_tag_indicators(xml_content):
+            # 提第一个非 Engineering 的子元素作为诊断
+            first_class = "Unknown"
+            first_line = 1
+            for elem in root:
+                if _local(elem.tag) != "Engineering":
+                    first_class = _local(elem.tag)
+                    # 找到对应行号
+                    raw = ET.tostring(elem, encoding="unicode")
+                    m = re.search(re.escape(raw[:50]), xml_content)
+                    if m:
+                        first_line = xml_content.count("\n", 0, m.start()) + 1
+                    break
+            raise ValueError(
+                f"[TAG_XML_WRONG_CLASS] XML 中未找到 HMI Tag 元素 (SW.Tag/SW.TagTable)。"
+                f"  first_element={first_class} at line {first_line}\n"
+                f"  failed_xml_path={xml_path}"
+            )
+
+    elif target_kind == "hmi_screen":
+        # V5.0: 先检查 SW.Blocks，再检查 Screen 节点
+        # 顺序重要：含 SW.Blocks 的 XML 即使有 Screen 也是错误的
+        has_plc, plc_type, line_no = _has_plc_block_indicators(xml_content)
+        if has_plc:
+            raise ValueError(
+                f"[TAG_XML_WRONG_CLASS] Screen XML 不应包含 PLC Blocks 类型 {plc_type} "
+                f"(第 {line_no} 行)。\n"
+                f"  failed_xml_path={xml_path}"
+            )
+
+        has_screen = any(
+            _local(e.tag) == "Screen"
+            for e in root.iter()
+        )
+        if not has_screen:
+            raise ValueError(
+                f"[TAG_XML_WRONG_CLASS] 当前导入目标是 HMI ScreenFolder，"
+                f"但 XML 中未找到 Screen 节点。\n"
+                f"  failed_xml_path={xml_path}"
+            )
+
+    elif target_kind == "plc_blocks":
+        # PLC blocks 允许 SW.Blocks，但应该检查是否真的包含 PLC 块
+        has_plc, plc_type, line_no = _has_plc_block_indicators(xml_content)
+        if not has_plc:
+            raise ValueError(
+                f"[TAG_XML_WRONG_CLASS] 当前导入目标是 PLC Blocks，"
+                f"但 XML 中未找到 SW.Blocks 或 PLC 块元素。\n"
+                f"  failed_xml_path={xml_path}"
+            )
+
+    else:
+        raise ValueError(
+            f"[TAG_XML_WRONG_CLASS] 未知的导入目标类型: '{target_kind}'。"
+            f" 支持: hmi_tags, hmi_screen, plc_blocks"
+        )
+
+
+def validate_for_import_target(xml_path: str, target: str = "hmi_tags"):
+    """目标感知的 XML 校验 — 比 validate_xml_class_for_import_target 更全面。
+
+    除了检查 XML 类别，还进行目标特定的额外校验:
+
+    target='hmi_tags':
+      - 不含 SW.Blocks（委托 validate_xml_class_for_import_target）
+      - 根对象 class 属于 HMI Tag / HMI TagTable / HMI TagFolder 相关类型
+      - 所有 tag 名唯一
+      - tag 数据类型可映射
+      - 不包含画面对象
+      - 不包含 PLC blocks
+
+    target='hmi_screen':
+      - 检查画面类
+      - 委托 validate_xml_class_for_import_target
+
+    target='plc_blocks':
+      - 允许 SW.Blocks
+      - 委托 validate_xml_class_for_import_target
+
+    参数:
+        xml_path: XML 文件路径
+        target: 导入目标类型
+
+    返回:
+        ValidationResult 对象
+
+    异常:
+        不抛出异常，所有问题通过 ValidationResult.errors 报告。
+    """
+    # 第一步：类别守卫
+    try:
+        validate_xml_class_for_import_target(xml_path, target)
+    except ValueError as e:
+        result = ValidationResult()
+        result.valid = False
+        result.errors.append(str(e))
+        return result
+
+    # 第二步：目标特定校验
+    result = ValidationResult()
+
+    try:
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+    except ET.ParseError as e:
+        result.valid = False
+        result.errors.append(f"XML 解析失败: {e}")
+        return result
+
+    def _local(tag: str) -> str:
+        if "}" in tag:
+            tag = tag.rsplit("}", 1)[-1]
+        if "." in tag:
+            tag = tag.rsplit(".", 1)[-1]
+        return tag
+
+    if target == "hmi_tags":
+        # 收集所有 tag 名称
+        tag_names = []
+        for elem in root.iter():
+            if _local(elem.tag) == "Tag":
+                for child in elem:
+                    if _local(child.tag) == "AttributeList":
+                        for attr in child:
+                            if _local(attr.tag) == "Name" and attr.text:
+                                tag_names.append(attr.text.strip())
+
+        # 检查 tag 名唯一
+        if len(tag_names) != len(set(tag_names)):
+            duplicates = [n for n in tag_names if tag_names.count(n) > 1]
+            result.errors.append(
+                f"HMI Tag XML 中存在重复变量名: {sorted(set(duplicates))}"
+            )
+            result.valid = False
+
+        # 检查是否有画面对象
+        has_screen = any(
+            _local(e.tag) == "Screen"
+            for e in root.iter()
+        )
+        if has_screen:
+            result.errors.append(
+                "HMI Tag XML 中不应包含 Screen 画面对象"
+            )
+            result.valid = False
+
+        # 检查是否有 VBScript 对象
+        has_script = any(
+            _local(e.tag) in ("Script", "VBScript")
+            for e in root.iter()
+        )
+        if has_script:
+            result.errors.append(
+                "HMI Tag XML 中不应包含 Script/VBScript 对象"
+            )
+            result.valid = False
+
+    elif target == "hmi_screen":
+        # 检查 screen 基本属性
+        for elem in root.iter():
+            if _local(elem.tag) == "Screen":
+                name = elem.get("Name", "")
+                if not name:
+                    result.errors.append("Screen 元素缺少 Name 属性")
+                    result.valid = False
+
+    return result

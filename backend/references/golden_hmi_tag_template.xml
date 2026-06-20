@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  金标准 HMI Tag XML 模板 (Golden HMI Tag XML Template)
+  用途: TagXmlBuilder 生成 HMI Tag XML 的参考格式。
+
+  正确结构:
+    <SW.Tag> ... </SW.Tag>
+  无需 SW.Blocks 包裹。
+
+  详细说明请见 INSTRUCTIONS_HMI_TAG_XML.md
+-->
+<Document xmlns="http://www.siemens.com/automation/SimaticML">
+  <Engineering version="V16"/>
+
+  <!-- 内部变量: 无连接, 无地址 -->
+  <SW.Tag ID="a1b2c3d4">
+    <AttributeList>
+      <Name>Internal_Tag_BOOL</Name>
+      <DataType>Bool</DataType>
+      <Connection></Connection>
+    </AttributeList>
+    <StartValue>0</StartValue>
+  </SW.Tag>
+
+  <!-- 外部变量 (连接 PLC): 有连接名和地址 -->
+  <SW.Tag ID="e5f6g7h8">
+    <AttributeList>
+      <Name>External_Tag_INT</Name>
+      <DataType>Int</DataType>
+      <Connection>HMI_Connection_1</Connection>
+      <Address>DB1.DBW0</Address>
+      <ControllerTag>PLC_Tag_1</ControllerTag>
+      <AcquisitionCycle>1s</AcquisitionCycle>
+    </AttributeList>
+  </SW.Tag>
+
+  <!-- 字符串类型外部变量 -->
+  <SW.Tag ID="i9j0k1l2">
+    <AttributeList>
+      <Name>Motor_Status_Text</Name>
+      <DataType>WString</DataType>
+      <Connection>HMI_Connection_1</Connection>
+      <Address>DB10.DBB100</Address>
+      <ControllerTag>MotorStatusText</ControllerTag>
+    </AttributeList>
+  </SW.Tag>
+</Document>

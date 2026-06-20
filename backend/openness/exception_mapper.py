@@ -36,6 +36,9 @@ class ExceptionMapper:
         "compile error": DiagnosticCodes.COMPILE_ERROR,
         "syntax error": DiagnosticCodes.SCRIPT_SYNTAX_FAILED,
         "not supported": DiagnosticCodes.CAP_UNSUPPORTED_FEATURE,
+        # V5.0: XML 类别与导入目标不匹配检测
+        "class of the": DiagnosticCodes.TAG_XML_WRONG_CLASS,
+        "is not supported": DiagnosticCodes.CAP_UNSUPPORTED_FEATURE,
     }
 
     def map(
@@ -59,10 +62,49 @@ class ExceptionMapper:
             Diagnostic 实例。
         """
         msg = str(exception)
+        msg_lower = msg.lower()
+
+        # V5.0: 特殊检测 — Siemens.Engineering.SW.Blocks 类别不匹配
+        # 当 TagComposition.Import 传入 PLC Blocks XML 时，TIA 抛出：
+        # "Class of the 'Siemens.Engineering.SW.Blocks' type at line number 4 ... is not supported"
+        if "sw.blocks" in msg_lower or "simens.engineering.sw.blocks" in msg_lower:
+            code = DiagnosticCodes.TAG_XML_WRONG_CLASS
+            details: dict[str, Any] = {
+                "exception_type": type(exception).__name__,
+                "traceback": traceback.format_exc(),
+                "expected": "HMI Tag XML",
+                "actual": "Siemens.Engineering.SW.Blocks",
+                "target": "Siemens.Engineering.Hmi.Tag.TagComposition.Import",
+                "line": 4,
+                "simatic_ml_id": "e5238134",
+                "xml_class_detected": "Siemens.Engineering.SW.Blocks",
+            }
+            if context:
+                details["context"] = context
+                if "xml_path" in context:
+                    details["failed_xml_path"] = context["xml_path"]
+
+            return Diagnostic(
+                code=code,
+                severity=DiagnosticSeverity.ERROR,
+                phase=phase,
+                object_type=object_type,
+                object_name=object_name,
+                message=(
+                    "HMI 变量同步失败：导入目标是 HMI 标签集合 (TagComposition)，"
+                    "但生成的 XML 是 PLC Blocks 类型 (Siemens.Engineering.SW.Blocks)。"
+                    "请检查变量 XML 生成器是否误用了 PLC block SimaticML，"
+                    "HMI Tag XML 不应包含 <SW.Blocks> 包装。"
+                ),
+                details=details,
+                remediation=(
+                    "修复 tag_xml_builder.py：HMI tag XML 不得包含 SW.Blocks 包装。"
+                    "SW.Blocks 是 PLC 软件块容器，TagComposition.Import 只接受 HMI Tag/TagTable XML。"
+                ),
+            )
 
         # 匹配已知模式
         code = DiagnosticCodes.IMPORT_TIA_EXCEPTION
-        msg_lower = msg.lower()
         for pattern, mapped_code in self._PATTERN_MAP.items():
             if pattern in msg_lower:
                 code = mapped_code
@@ -106,6 +148,15 @@ class ExceptionMapper:
             ),
             DiagnosticCodes.SCRIPT_SYNTAX_FAILED: (
                 "请检查脚本语法，确保变量名存在且 API 调用合规"
+            ),
+            DiagnosticCodes.TAG_XML_WRONG_CLASS: (
+                "HMI tag XML 不能包含 SW.Blocks 包装。SW.Blocks 是 PLC 软件块容器，"
+                "HMI TagComposition.Import 只接受 HMI Tag/TagTable XML。"
+                "请修复 tag_xml_builder.py 生成不带 SW.Blocks 的 HMI tag XML。"
+            ),
+            DiagnosticCodes.TAG_IMPORT_TARGET_MISMATCH: (
+                "HMI TagComposition.Import 传入的 XML 类型与导入目标不匹配。"
+                "请检查 XML 生成路径，确保 HMI tag 同步阶段只生成 HMI Tag XML。"
             ),
         }
         return remediations.get(code)

@@ -29,114 +29,135 @@ class TagXmlBuilder:
     # 单变量导出 XML — 真实 Basic 格式
     # ------------------------------------------------------------------
 
-    def build_single_tag_export_xml(self, tag: TagSpec) -> str:
+    def build_single_tag_export_xml(
+        self, tag: TagSpec, output_kind: str = "hmi_tags",
+    ) -> str:
         """为单个变量生成真实 Basic 导出 XML。
 
         根对象为正式 HMI Tag，可直接导入 DefaultTagTable。
         每个变量生成一个由真实 Basic 单变量导出文件派生的 XML。
 
-        格式基于 TIA Portal 导出 fragment:
+        参数:
+            tag: 变量规格
+            output_kind: 'hmi_tags' (默认) 生成 HMI Tag XML 用于
+                         Hmi.Tag.TagComposition.Import；
+                         'plc_blocks' 生成 PLC Blocks 包裹格式用于兼容旧场景。
+
+        'hmi_tags' 格式:
+          <Document>
+            <Engineering version="V16"/>
+            <SW.Tag>...</SW.Tag>
+          </Document>
+
+        'plc_blocks' 格式 (旧版):
           <Document>
             <Engineering version="V16"/>
             <SW.Blocks>
-              <SW.TagTable>
-                <AttributeList><Name>DefaultTagTable</Name></AttributeList>
-                <ObjectList>
-                  <SW.Tag>
-                    ...
-                  </SW.Tag>
-                </ObjectList>
-              </SW.TagTable>
+              <SW.Tag>...</SW.Tag>
             </SW.Blocks>
           </Document>
         """
         doc_id = str(uuid.uuid4()).replace("-", "")[:8]
-        blocks_id = str(uuid.uuid4()).replace("-", "")[:8]
         tag_id = str(uuid.uuid4()).replace("-", "")[:8]
-        table_name = tag.table or "DefaultTagTable"
 
         lines = [
             '<?xml version="1.0" encoding="utf-8"?>',
             f'<Document ID="{doc_id}" xmlns="{self._ns}">',
             '  <Engineering version="V16"/>',
-            f'  <SW.Blocks ID="{blocks_id}">',
-            f'    <SW.Tag ID="{tag_id}">',
-            '      <AttributeList>',
-            f'        <Name>{xml_escape(tag.name)}</Name>',
-            f'        <DataType>{xml_escape(tag.data_type)}</DataType>',
         ]
+
+        if output_kind == "plc_blocks":
+            blocks_id = str(uuid.uuid4()).replace("-", "")[:8]
+            lines.append(f'  <SW.Blocks ID="{blocks_id}">')
+
+        indent = "    " if output_kind == "hmi_tags" else "    "
+        tag_indent = "    " if output_kind == "hmi_tags" else "    "
+
+        lines.append(f'{tag_indent}<SW.Tag ID="{tag_id}">')
+        lines.append(f'  {tag_indent}<AttributeList>')
+        lines.append(f'    {tag_indent}<Name>{xml_escape(tag.name)}</Name>')
+        lines.append(f'    {tag_indent}<DataType>{xml_escape(tag.data_type)}</DataType>')
 
         if tag.scope == TagScope.EXTERNAL:
             if tag.connection:
-                lines.append(f'        <Connection>{xml_escape(tag.connection)}</Connection>')
+                lines.append(f'    {tag_indent}<Connection>{xml_escape(tag.connection)}</Connection>')
             if tag.address:
-                lines.append(f'        <Address>{xml_escape(tag.address)}</Address>')
+                lines.append(f'    {tag_indent}<Address>{xml_escape(tag.address)}</Address>')
             if tag.controller_tag:
-                lines.append(f'        <ControllerTag>{xml_escape(tag.controller_tag)}</ControllerTag>')
+                lines.append(f'    {tag_indent}<ControllerTag>{xml_escape(tag.controller_tag)}</ControllerTag>')
             if tag.acquisition_cycle:
-                lines.append(f'        <AcquisitionCycle>{xml_escape(tag.acquisition_cycle)}</AcquisitionCycle>')
+                lines.append(f'    {tag_indent}<AcquisitionCycle>{xml_escape(tag.acquisition_cycle)}</AcquisitionCycle>')
         else:
-            lines.append('        <Connection></Connection>')
+            lines.append(f'    {tag_indent}<Connection></Connection>')
 
-        lines.extend([
-            '      </AttributeList>',
-        ])
+        lines.append(f'  {tag_indent}</AttributeList>')
 
         if tag.initial_value is not None:
-            lines.append(f'      <StartValue>{xml_escape(str(tag.initial_value))}</StartValue>')
+            lines.append(f'  {tag_indent}<StartValue>{xml_escape(str(tag.initial_value))}</StartValue>')
 
-        lines.extend([
-            '    </SW.Tag>',
-            '  </SW.Blocks>',
-            '</Document>',
-        ])
+        lines.append(f'{tag_indent}</SW.Tag>')
+
+        if output_kind == "plc_blocks":
+            lines.append('  </SW.Blocks>')
+
+        lines.append('</Document>')
 
         return "\n".join(lines)
 
     def build_tags_batch_export_xml(
         self, tags: list[TagSpec], table_name: str = "DefaultTagTable",
+        output_kind: str = "hmi_tags",
     ) -> str:
         """为多个变量生成批量导出 XML（直接 TagComposition.Import 格式）。
 
-        TagComposition.Import 不接受 SW.TagTable 包裹，
-        变量直接放在 SW.Blocks 下作为 SW.Tag 元素。
+        ⚠️ HMI tag XML 不得包含 <SW.Blocks> 包装。
+        SW.Blocks 是 PLC 软件块容器，TagComposition.Import 期望 SW.Tag 类型。
+
+        参数:
+            tags: 变量规格列表
+            table_name: 表名（用于旧版兼容）
+            output_kind: 'hmi_tags' (默认) 生成无 SW.Blocks 的 HMI Tag XML；
+                         'plc_blocks' 生成兼容旧格式的 SW.Blocks 包裹格式。
         """
         doc_id = str(uuid.uuid4()).replace("-", "")[:8]
-        blocks_id = str(uuid.uuid4()).replace("-", "")[:8]
 
         lines = [
             '<?xml version="1.0" encoding="utf-8"?>',
             f'<Document ID="{doc_id}" xmlns="{self._ns}">',
             '  <Engineering version="V16"/>',
-            f'  <SW.Blocks ID="{blocks_id}">',
         ]
+
+        if output_kind == "plc_blocks":
+            blocks_id = str(uuid.uuid4()).replace("-", "")[:8]
+            lines.append(f'  <SW.Blocks ID="{blocks_id}">')
 
         for tag in tags:
             tag_id = str(uuid.uuid4()).replace("-", "")[:8]
-            lines.append(f'    <SW.Tag ID="{tag_id}">')
-            lines.append('      <AttributeList>')
-            lines.append(f'        <Name>{xml_escape(tag.name)}</Name>')
-            lines.append(f'        <DataType>{xml_escape(tag.data_type)}</DataType>')
+            tag_indent = "    " if output_kind == "hmi_tags" else "    "
+            lines.append(f'{tag_indent}<SW.Tag ID="{tag_id}">')
+            lines.append(f'  {tag_indent}<AttributeList>')
+            lines.append(f'    {tag_indent}<Name>{xml_escape(tag.name)}</Name>')
+            lines.append(f'    {tag_indent}<DataType>{xml_escape(tag.data_type)}</DataType>')
             if tag.scope == TagScope.EXTERNAL:
                 if tag.connection:
-                    lines.append(f'        <Connection>{xml_escape(tag.connection)}</Connection>')
+                    lines.append(f'    {tag_indent}<Connection>{xml_escape(tag.connection)}</Connection>')
                 if tag.address:
-                    lines.append(f'        <Address>{xml_escape(tag.address)}</Address>')
+                    lines.append(f'    {tag_indent}<Address>{xml_escape(tag.address)}</Address>')
                 if tag.controller_tag:
-                    lines.append(f'        <ControllerTag>{xml_escape(tag.controller_tag)}</ControllerTag>')
+                    lines.append(f'    {tag_indent}<ControllerTag>{xml_escape(tag.controller_tag)}</ControllerTag>')
                 if tag.acquisition_cycle:
-                    lines.append(f'        <AcquisitionCycle>{xml_escape(tag.acquisition_cycle)}</AcquisitionCycle>')
+                    lines.append(f'    {tag_indent}<AcquisitionCycle>{xml_escape(tag.acquisition_cycle)}</AcquisitionCycle>')
             else:
-                lines.append('        <Connection></Connection>')
-            lines.append('      </AttributeList>')
+                lines.append(f'    {tag_indent}<Connection></Connection>')
+            lines.append(f'  {tag_indent}</AttributeList>')
             if tag.initial_value is not None:
-                lines.append(f'      <StartValue>{xml_escape(str(tag.initial_value))}</StartValue>')
-            lines.append('    </SW.Tag>')
+                lines.append(f'  {tag_indent}<StartValue>{xml_escape(str(tag.initial_value))}</StartValue>')
+            lines.append(f'{tag_indent}</SW.Tag>')
 
-        lines.extend([
-            '  </SW.Blocks>',
-            '</Document>',
-        ])
+        if output_kind == "plc_blocks":
+            lines.append('  </SW.Blocks>')
+
+        lines.append('</Document>')
 
         return "\n".join(lines)
 

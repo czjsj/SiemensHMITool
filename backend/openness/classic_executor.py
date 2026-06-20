@@ -885,6 +885,36 @@ class ClassicOpennessExecutor:
                 sha.update(chunk)
         return sha.hexdigest()
 
+    @staticmethod
+    def _save_import_failure_copy(xml_content: str, prefix: str = "tag_import"):
+        """将 XML 复制到后端 debug 目录，用于失败后诊断。
+
+        V5.0: 在每次导入前复制 XML 到 backend/debug/tia_import_failures/，
+        文件名包含时间戳、阶段名。失败后不删除，用于事后分析。
+
+        参数:
+            xml_content: XML 字符串内容。
+            prefix: 文件名前缀，默认 'tag_import'。
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        try:
+            debug_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                "debug",
+                "tia_import_failures",
+            )
+            os.makedirs(debug_dir, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            rand = hashlib.md5(xml_content.encode()).hexdigest()[:4]
+            filename = f"{prefix}_{ts}_{rand}.xml"
+            dest_path = os.path.join(debug_dir, filename)
+            with open(dest_path, "w", encoding="utf-8") as f:
+                f.write(xml_content)
+            logger.debug("已保存导入 XML 副本到 %s", dest_path)
+        except Exception as e:
+            logger.debug("保存导入 XML 副本失败: %s", e)
+
     # ------------------------------------------------------------------
     # 统一导入入口 — 根据 XML 类型自动选择目标
     # ------------------------------------------------------------------
@@ -1300,6 +1330,9 @@ class ClassicOpennessExecutor:
 
         禁止:
           TagFolder.Importer.Import(StreamReader) — 不存在且未经验证
+
+        V5.0: 导入前增加 XML 类型守卫校验，防止 SW.Blocks (PLC Blocks) XML
+        错误地传入 HMI TagComposition.Import。增加失败文件保留机制。
         """
         result = ClassicStepResult("tags", OpennessOperationKind.TIA_MUTATION)
         if not tags_xml.strip():
@@ -1315,6 +1348,31 @@ class ClassicOpennessExecutor:
             # 写入临时文件
             temp_path = self._write_temp_xml(tags_xml, "tags")
             result.temp_files.append(temp_path)
+
+            # V5.0: 失败文件保留 — 复制 XML 到 debug 目录
+            self._save_import_failure_copy(tags_xml, "tag_import")
+
+            # V5.0: XML 类型守卫校验 — 在调用 Import 之前
+            from backend.xml_validator import validate_xml_class_for_import_target
+            try:
+                validate_xml_class_for_import_target(temp_path, "hmi_tags")
+            except ValueError as guard_err:
+                error_msg = str(guard_err)
+                logging.getLogger(__name__).error(
+                    "XML 类型守卫拦截: %s", error_msg
+                )
+                result.diagnostics.append(Diagnostic(
+                    code=DiagnosticCodes.TAG_XML_WRONG_CLASS,
+                    severity=DiagnosticSeverity.ERROR,
+                    phase="P30_TAG_TABLES_AND_TAGS",
+                    message=f"HMI variable sync failed: {error_msg}",
+                    details={
+                        "stage": "PRE_IMPORT_XML_TYPE_GUARD",
+                        "xml_path": temp_path,
+                        "guard_error": error_msg,
+                    },
+                ))
+                return result
 
             import_opts = self._make_import_options()
             file_info = self._make_file_info(temp_path)
@@ -1799,11 +1857,24 @@ class ClassicOpennessExecutor:
                 )
             except Exception as exc:
                 logger.error("XML Import (all methods) failed: %s", exc)
+                exc_msg = str(exc).lower()
+                # V5.0: 检测 SW.Blocks 类型不匹配错误
+                if "sw.blocks" in exc_msg or "simens.engineering.sw.blocks" in exc_msg:
+                    diag_code = DiagnosticCodes.TAG_XML_WRONG_CLASS
+                    diag_msg = (
+                        f"HMI 变量同步失败：导入目标是 HMI 标签集合 (TagComposition)，"
+                        f"但生成的 XML 是 PLC Blocks 类型 (Siemens.Engineering.SW.Blocks)。"
+                        f"请检查变量 XML 生成器是否误用了 PLC block SimaticML。"
+                        f"错误: {exc}"
+                    )
+                else:
+                    diag_code = DiagnosticCodes.TAG_XML_IMPORT_FAILED
+                    diag_msg = f"XML Import 失败: {exc}"
                 result.diagnostics.append(Diagnostic(
-                    code=DiagnosticCodes.TAG_XML_IMPORT_FAILED,
+                    code=diag_code,
                     severity=DiagnosticSeverity.ERROR,
                     phase="P30_TAG_TABLES_AND_TAGS",
-                    message=f"XML Import 失败: {exc}",
+                    message=diag_msg,
                     details={
                         "strategy": resolution.get("source", "unknown"),
                         "overload_resolver": resolution_overload,
