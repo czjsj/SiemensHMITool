@@ -120,13 +120,13 @@ def validate_ir_v2(project: HmiProjectSpec) -> list[Diagnostic]:
             ))
         resource_names.add(resource.name)
 
-    # 8. 控件 tag_binding 引用目标变量必须存在
+    # 8. 控件 tag_binding 引用目标变量必须存在 — V4.1: ERROR 级别阻断
     for screen in project.screens:
         for item in screen.items:
             if item.tag_binding and item.tag_binding not in tag_names:
                 diagnostics.append(Diagnostic(
                     code=DiagnosticCodes.VERIFY_TAG_MISSING,
-                    severity=DiagnosticSeverity.WARNING,
+                    severity=DiagnosticSeverity.ERROR,
                     phase="P10_VALIDATE_DEPENDENCIES",
                     object_type="screen_item",
                     object_name=item.id,
@@ -142,7 +142,7 @@ def validate_ir_v2(project: HmiProjectSpec) -> list[Diagnostic]:
                 if binding.source_tag and binding.source_tag not in tag_names:
                     diagnostics.append(Diagnostic(
                         code=DiagnosticCodes.VERIFY_TAG_MISSING,
-                        severity=DiagnosticSeverity.WARNING,
+                        severity=DiagnosticSeverity.ERROR,
                         phase="P10_VALIDATE_DEPENDENCIES",
                         object_type="binding",
                         object_name=item.id,
@@ -152,13 +152,13 @@ def validate_ir_v2(project: HmiProjectSpec) -> list[Diagnostic]:
                         ),
                     ))
 
-            # 控件事件动作引用
+            # 控件事件动作引用 — V4.1: ERROR 级别阻断
             for event in item.events:
                 for action in event.actions:
                     if action.tag and action.tag not in tag_names:
                         diagnostics.append(Diagnostic(
                             code=DiagnosticCodes.VERIFY_TAG_MISSING,
-                            severity=DiagnosticSeverity.WARNING,
+                            severity=DiagnosticSeverity.ERROR,
                             phase="P10_VALIDATE_DEPENDENCIES",
                             object_type="action",
                             object_name=item.id,
@@ -170,7 +170,7 @@ def validate_ir_v2(project: HmiProjectSpec) -> list[Diagnostic]:
                     if action.screen and action.screen not in screen_names:
                         diagnostics.append(Diagnostic(
                             code=DiagnosticCodes.VERIFY_SCREEN_MISSING,
-                            severity=DiagnosticSeverity.WARNING,
+                            severity=DiagnosticSeverity.ERROR,
                             phase="P10_VALIDATE_DEPENDENCIES",
                             object_type="action",
                             object_name=item.id,
@@ -182,7 +182,7 @@ def validate_ir_v2(project: HmiProjectSpec) -> list[Diagnostic]:
                     if action.script and action.script not in script_names:
                         diagnostics.append(Diagnostic(
                             code=DiagnosticCodes.VERIFY_SCRIPT_MISSING,
-                            severity=DiagnosticSeverity.WARNING,
+                            severity=DiagnosticSeverity.ERROR,
                             phase="P10_VALIDATE_DEPENDENCIES",
                             object_type="action",
                             object_name=item.id,

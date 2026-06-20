@@ -331,39 +331,544 @@ class ClassicOpennessExecutor:
             f.write(xml_content)
         return path
 
-    @staticmethod
-    def _make_import_options():
-        """创建 Siemens.Engineering.ImportOptions 实例。
+    # ------------------------------------------------------------------
+    # V4.2: ImportOptions 解析器 — 多路径枚举 + 别名匹配
+    # ------------------------------------------------------------------
 
-        尝试加载 ImportOptions 类；不可用时返回 None。
+    # 别名映射：不同 TIA 版本中 enum 成员名可能不同
+    _IMPORT_OPTION_ALIASES: dict[str, list[str]] = {
+        "Override": ["Override", "Overwrite", "Replace"],
+        "Merge":    ["Merge", "Update", "Modify"],
+    }
+
+    @staticmethod
+    def resolve_import_option(
+        tia_module=None,
+        preferred: str = "Override",
+    ) -> dict:
+        """解析 Siemens.Engineering.ImportOptions，返回结构化结果。
+
+        使用多种方式尝试解析 ImportOptions 枚举值：
+          A. 直接属性：ImportOptions.Override
+          B. System.Enum.Parse(import_options_type, "Override")
+          C. System.Enum.GetNames(import_options_type) 列出可用名
+          D. 别名匹配：Override → Overwrite/Replace, Merge → Update/Modify
+
+        参数:
+            tia_module: Siemens.Engineering 模块引用（可选，用于加载程序集）。
+            preferred:  首选选项名（默认 "Override"）。
+
+        返回:
+            {
+                "ok": bool,
+                "value": int | None,        # 枚举整数值
+                "selected": str | None,     # 实际选中的选项名
+                "available": list[str],     # 枚举中所有可用名称
+                "source": str,              # 解析路径 (direct/enum-parse/alias-match/none)
+                "error": str | None,        # 失败时的错误消息
+                "diagnostics": list[str],   # 各步骤的诊断日志
+            }
         """
-        try:
-            # 优先使用 Hmi 命名空间下的 ImportOptions
+        result: dict = {
+            "ok": False,
+            "value": None,
+            "enum_type": None,
+            "selected": None,
+            "available": [],
+            "source": "none",
+            "error": None,
+            "diagnostics": [],
+        }
+
+        aliases = ClassicOpennessExecutor._IMPORT_OPTION_ALIASES.get(
+            preferred, [preferred],
+        )
+
+        # 尝试两个命名空间
+        for ns_label, ns_path in [
+            ("Hmi.ImportOptions", "Siemens.Engineering.Hmi"),
+            ("Engineering.ImportOptions", "Siemens.Engineering"),
+        ]:
             try:
-                from Siemens.Engineering.Hmi import ImportOptions  # type: ignore
-                opts = ImportOptions()
-                # 设置为 Override 模式
+                ns_module = __import__(ns_path, fromlist=["ImportOptions"])
+                import_opts_type = getattr(ns_module, "ImportOptions", None)
+                if import_opts_type is None:
+                    result["diagnostics"].append(
+                        f"{ns_label}: ImportOptions 不存在于命名空间"
+                    )
+                    continue
+
+                type_name = str(getattr(import_opts_type, "__name__", import_opts_type))
+                result["diagnostics"].append(
+                    f"{ns_label}: 找到类型 {type_name}"
+                )
+
+                # A. 直接属性
+                for alias in aliases:
+                    try:
+                        val = getattr(import_opts_type, alias, None)
+                        if val is not None:
+                            result["ok"] = True
+                            result["value"] = int(val)
+                            result["selected"] = alias
+                            result["source"] = f"direct:{ns_label}"
+                            result["diagnostics"].append(
+                                f"{ns_label}: 直接属性 {alias}={val}"
+                            )
+                            return result
+                    except Exception:
+                        pass
+
+                # B. System.Enum.Parse
                 try:
-                    opts.Mode = getattr(ImportOptions, "Override", 0)
+                    from System import Enum  # type: ignore
+                    for alias in aliases:
+                        try:
+                            parsed = Enum.Parse(import_opts_type, alias)
+                            if parsed is not None:
+                                result["ok"] = True
+                                result["value"] = int(parsed)
+                                result["selected"] = alias
+                                result["source"] = f"enum-parse:{ns_label}"
+                                result["diagnostics"].append(
+                                    f"{ns_label}: Enum.Parse({alias})={parsed}"
+                                )
+                                return result
+                        except Exception:
+                            pass
+                except Exception as exc:
+                    result["diagnostics"].append(
+                        f"{ns_label}: System.Enum.Parse 不可用: {exc}"
+                    )
+
+                # C. System.Enum.GetNames
+                try:
+                    from System import Enum  # type: ignore
+                    names = list(Enum.GetNames(import_opts_type))
+                    result["available"] = names
+                    result["diagnostics"].append(
+                        f"{ns_label}: Enum.GetNames = {names}"
+                    )
+
+                    for alias in aliases:
+                        if alias in names:
+                            parsed = Enum.Parse(import_opts_type, alias)
+                            result["ok"] = True
+                            result["value"] = int(parsed)
+                            result["selected"] = alias
+                            result["source"] = f"enum-names:{ns_label}"
+                            result["diagnostics"].append(
+                                f"{ns_label}: 通过 GetNames 找到 {alias}={parsed}"
+                            )
+                            return result
+                except Exception as exc:
+                    result["diagnostics"].append(
+                        f"{ns_label}: System.Enum.GetNames 不可用: {exc}"
+                    )
+
+                # D. 反射列出字段
+                try:
+                    fields = []
+                    for attr_name in dir(import_opts_type):
+                        if attr_name.startswith("_"):
+                            continue
+                        try:
+                            v = getattr(import_opts_type, attr_name)
+                            if isinstance(v, int):
+                                fields.append((attr_name, v))
+                        except Exception:
+                            pass
+                    if fields and not result["available"]:
+                        result["available"] = [f[0] for f in fields]
+                        result["diagnostics"].append(
+                            f"{ns_label}: dir() 字段探测 = {fields}"
+                        )
+                    for alias in aliases:
+                        for fname, fval in fields:
+                            if fname == alias:
+                                result["ok"] = True
+                                result["value"] = fval
+                                result["selected"] = alias
+                                result["source"] = f"field-probe:{ns_label}"
+                                result["diagnostics"].append(
+                                    f"{ns_label}: 字段探测 {alias}={fval}"
+                                )
+                                return result
+                except Exception as exc:
+                    result["diagnostics"].append(
+                        f"{ns_label}: 字段探测失败: {exc}"
+                    )
+
+            except ImportError as exc:
+                result["diagnostics"].append(
+                    f"{ns_label}: 导入失败: {exc}"
+                )
+            except Exception as exc:
+                result["diagnostics"].append(
+                    f"{ns_label}: 异常: {exc}"
+                )
+
+        # E. Assembly scan — 遍历已加载程序集查找 ImportOptions 类型
+        result["searched_assemblies"] = []
+        try:
+            from System import AppDomain  # type: ignore
+            for assembly in AppDomain.CurrentDomain.GetAssemblies():
+                asm_name = str(getattr(assembly, "FullName", assembly))
+                result["searched_assemblies"].append(asm_name)
+                try:
+                    opts_type = assembly.GetType(
+                        "Siemens.Engineering.ImportOptions", False
+                    )
+                    if opts_type is not None:
+                        result["diagnostics"].append(
+                            f"assembly-scan: 在程序集 '{asm_name}' 中找到 ImportOptions"
+                        )
+
+                        # 用 System.Enum 解析
+                        from System import Enum  # type: ignore
+                        names = list(Enum.GetNames(opts_type))
+                        result["available"] = names
+                        result["diagnostics"].append(
+                            f"assembly-scan: Enum.GetNames = {names}"
+                        )
+
+                        for alias in aliases:
+                            if alias in names:
+                                parsed = Enum.Parse(opts_type, alias)
+                                if parsed is not None:
+                                    result["ok"] = True
+                                    result["value"] = parsed
+                                    result["enum_type"] = opts_type
+                                    result["selected"] = alias
+                                    result["source"] = f"assembly-scan:{asm_name}"
+                                    result["diagnostics"].append(
+                                        f"assembly-scan: 找到 {alias}={parsed}"
+                                    )
+                                    return result
+
+                        # 别名匹配
+                        for alias in aliases:
+                            try:
+                                parsed = Enum.Parse(opts_type, alias)
+                                result["ok"] = True
+                                result["value"] = parsed
+                                result["enum_type"] = opts_type
+                                result["selected"] = alias
+                                result["source"] = f"assembly-scan-parse:{asm_name}"
+                                result["diagnostics"].append(
+                                    f"assembly-scan: Enum.Parse({alias})={parsed}"
+                                )
+                                return result
+                            except Exception:
+                                pass
+
                 except Exception:
-                    pass
-                return opts
+                    continue
+        except Exception as exc:
+            result["diagnostics"].append(
+                f"assembly-scan: AppDomain 不可用: {exc}"
+            )
+            result["searched_assemblies"] = []
+
+        # 全部失败
+        result["error"] = (
+            f"无法解析 ImportOptions.{preferred}。"
+            f"已尝试别名: {aliases}，"
+            f"可用名称: {result['available'] or 'N/A'}。"
+            f"已搜索程序集: {len(result.get('searched_assemblies', []))} 个"
+        )
+        return result
+
+    @staticmethod
+    def resolve_import_option_from_overload(
+        tag_composition,
+        preferred: str = "Override",
+    ) -> dict:
+        """从 TagComposition.Import 方法重载的第二参数类型解析 ImportOptions。
+
+        不需要导入 Siemens.Engineering 命名空间，也不需要 assembly scan。
+        直接从 Import 方法签名的 ParameterType 反射获取 enum 类型。
+
+        返回结构同 resolve_import_option()：
+          ok, value, selected, available, source, error, diagnostics,
+          method_signature, type_full_name
+        """
+        result: dict = {
+            "ok": False,
+            "value": None,
+            "enum_type": None,
+            "selected": None,
+            "available": [],
+            "source": "none",
+            "error": None,
+            "diagnostics": [],
+            "method_signature": None,
+            "type_full_name": None,
+        }
+
+        # 获取 System.Enum（优先 CLR，失败回退模块级 mock）
+        _system_enum = getattr(ClassicOpennessExecutor, "_test_enum", None)
+        if _system_enum is None:
+            try:
+                from System import Enum  # type: ignore
+                _system_enum = Enum
             except ImportError:
                 pass
-            # 回退到通用 ImportOptions
+
+        if _system_enum is None:
+            result["diagnostics"].append(
+                "overload-param: System.Enum 不可用（无 CLR 环境）"
+            )
+
+        if tag_composition is None:
+            result["error"] = "tag_composition is None"
+            return result
+
+        try:
+            methods = list(tag_composition.GetType().GetMethods())
+            import_methods = [m for m in methods if m.Name == "Import"]
+            result["diagnostics"].append(
+                f"overload-param: 找到 {len(import_methods)} 个 Import 重载"
+            )
+
+            aliases = ClassicOpennessExecutor._IMPORT_OPTION_ALIASES.get(
+                preferred, [preferred]
+            )
+
+            for method in import_methods:
+                try:
+                    params = list(method.GetParameters())
+                    if len(params) < 2:
+                        continue
+
+                    p1 = params[1]
+                    p1_type = p1.ParameterType
+                    type_name = str(getattr(p1_type, "FullName", p1_type))
+                    is_enum = bool(getattr(p1_type, "IsEnum", False))
+
+                    result["diagnostics"].append(
+                        f"overload-param: params[1] type={type_name}, IsEnum={is_enum}"
+                    )
+
+                    if not is_enum:
+                        continue
+
+                    if _system_enum is None:
+                        result["diagnostics"].append(
+                            "overload-param: 找到 enum 参数但 System.Enum 不可用"
+                        )
+                        continue
+
+                    names = list(_system_enum.GetNames(p1_type))
+                    result["available"] = names
+                    result["type_full_name"] = type_name
+                    p0_type = params[0].ParameterType
+                    p0_name = str(getattr(p0_type, "FullName", p0_type))
+                    result["method_signature"] = f"Import({p0_name}, {type_name})"
+
+                    # 尝试 preferred 及其别名
+                    for alias in aliases:
+                        if alias in names:
+                            parsed = _system_enum.Parse(p1_type, alias)
+                            result["ok"] = True
+                            result["value"] = parsed
+                            result["enum_type"] = p1_type
+                            result["selected"] = alias
+                            result["source"] = "import_overload_parameter"
+                            result["diagnostics"].append(
+                                f"overload-param: 找到 {alias}={int(parsed)}"
+                            )
+                            return result
+
+                    # 别名不在 names 中，尝试 Enum.Parse 直接
+                    for alias in aliases:
+                        try:
+                            parsed = _system_enum.Parse(p1_type, alias)
+                            result["ok"] = True
+                            result["value"] = parsed
+                            result["enum_type"] = p1_type
+                            result["selected"] = alias
+                            result["source"] = "import_overload_parameter"
+                            result["diagnostics"].append(
+                                f"overload-param: Enum.Parse({alias})={int(parsed)}"
+                            )
+                            return result
+                        except Exception:
+                            continue
+
+                except Exception as exc:
+                    result["diagnostics"].append(
+                        f"overload-param: 处理重载异常: {exc}"
+                    )
+                    continue
+
+        except Exception as exc:
+            result["diagnostics"].append(
+                f"overload-param: GetMethods 失败: {exc}"
+            )
+
+        # 没有找到合适的 enum 参数
+        result["error"] = (
+            f"Import 重载的第二参数不是 enum 类型。"
+            f"已检查 {len(result['diagnostics'])} 个诊断信息。"
+        )
+        if not result["available"]:
+            result["error"] += " 可用 enum 名称: N/A"
+        else:
+            result["error"] += f" 可用 enum 名称: {result['available']}"
+
+        return result
+
+    @staticmethod
+    def invoke_tag_composition_import(
+        tag_composition,
+        xml_path: str,
+        option_result: dict,
+    ) -> None:
+        """通过 MethodInfo.Invoke 调用 TagComposition.Import。
+
+        当 pythonnet 直接调用 tag_composition.Import(file_info, option)
+        失败时，使用此方法通过反射调用。
+
+        参数:
+            tag_composition: TagComposition .NET 对象
+            xml_path: XML 文件路径字符串
+            option_result: resolve_import_option 或
+                          resolve_import_option_from_overload 的返回结果
+
+        异常:
+            RuntimeError: 所有匹配重载都失败时抛出
+        """
+        from System.IO import FileInfo  # type: ignore
+        from System import Array, Object, Enum  # type: ignore
+
+        file_info = FileInfo(xml_path)
+
+        # Ensure arg1 is a proper .NET enum, not Python int
+        option_value = option_result["value"]
+        enum_type = option_result.get("enum_type")
+
+        if isinstance(option_value, int) and not hasattr(option_value, "GetType"):
+            # Python int — must convert to .NET enum via Enum.ToObject
+            if enum_type is None:
+                raise RuntimeError(
+                    "option_result['value'] is Python int but no enum_type provided. "
+                    "Cannot convert to .NET enum for MethodInfo.Invoke."
+                )
+            try:
+                option_value = Enum.ToObject(enum_type, option_value)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Enum.ToObject(enum_type={enum_type.FullName}, "
+                    f"value={option_value}) failed: {exc}"
+                ) from exc
+
+        # Match the correct Import overload by param[1] type
+        methods = tag_composition.GetType().GetMethods()
+        best_match = None
+        for method in methods:
+            if method.Name != "Import":
+                continue
+            params = method.GetParameters()
+            if len(params) != 2:
+                continue
+            p1_type = params[1].ParameterType
+            p1_type_name = str(getattr(p1_type, "FullName", p1_type))
+
+            # Prefer matching enum_type, fallback to any IsEnum second param
+            if enum_type is not None and hasattr(enum_type, "FullName"):
+                if p1_type_name == enum_type.FullName:
+                    best_match = (method, params)
+                    break
+            elif getattr(p1_type, "IsEnum", False):
+                if best_match is None:
+                    best_match = (method, params)
+
+        if best_match is None:
+            raise RuntimeError(
+                "未找到匹配的双参数 Import 方法重载"
+            )
+
+        method, params = best_match
+        p0_type = params[0].ParameterType
+        p1_type = params[1].ParameterType
+        p0_type_name = str(getattr(p0_type, "FullName", p0_type))
+
+        # 构造参数数组
+        if "FileInfo" in p0_type_name:
+            arg0 = file_info
+        else:
+            arg0 = xml_path  # String 类型
+
+        args = Array[Object]([arg0, option_value])
+
+        try:
+            method.Invoke(tag_composition, args)
+            return  # 成功
+        except Exception as exc:
+            raise RuntimeError(
+                f"MethodInfo.Invoke 失败: method=Import, "
+                f"args=({type(arg0).__name__}, {p1_type.FullName}), "
+                f"arg0_type=System.IO.FileInfo, "
+                f"arg1_type={p1_type.FullName}, "
+                f"error={exc}"
+            ) from exc
+
+    @staticmethod
+    def _make_import_options():
+        """创建 Siemens.Engineering.ImportOptions 实例，设为 Override 模式。
+
+        V4.2: 委托给 resolve_import_option() 进行多路径解析。
+        返回 ImportOptions 实例或 None（完全失败时）。
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        resolution = ClassicOpennessExecutor.resolve_import_option(
+            preferred="Override",
+        )
+
+        if not resolution["ok"]:
+            logger.warning(
+                "ImportOptions 解析失败: selected=%s, available=%s, source=%s, error=%s",
+                resolution["selected"],
+                resolution["available"],
+                resolution["source"],
+                resolution["error"],
+            )
+            for diag in resolution.get("diagnostics", []):
+                logger.debug("  ImportOptions diagnostic: %s", diag)
+            return None
+
+        logger.info(
+            "ImportOptions 解析成功: selected=%s, value=%s, source=%s, available=%s",
+            resolution["selected"],
+            resolution["value"],
+            resolution["source"],
+            resolution["available"],
+        )
+
+        # 构造 ImportOptions 实例并赋值 Mode
+        try:
+            from Siemens.Engineering.Hmi import ImportOptions  # type: ignore
+            opts = ImportOptions()
+        except Exception:
             try:
                 from Siemens.Engineering import ImportOptions  # type: ignore
                 opts = ImportOptions()
-                try:
-                    opts.Mode = getattr(ImportOptions, "Override", 0)
-                except Exception:
-                    pass
-                return opts
-            except ImportError:
-                pass
+            except Exception:
+                return None
+
+        try:
+            opts.Mode = resolution["value"]
         except Exception:
-            pass
-        return None
+            try:
+                from System import Enum  # type: ignore
+                opts.Mode = Enum.ToObject(type(opts.Mode), resolution["value"])
+            except Exception:
+                return None
+
+        return opts
 
     @staticmethod
     def _make_file_info(path: str):
@@ -485,6 +990,19 @@ class ClassicOpennessExecutor:
                 )
 
             tags_collection = default_table.Tags
+
+            # V4.2: 反射确认 Import 方法可用
+            from backend.openness.reflection_utils import has_method, describe_dotnet_methods
+            if not has_method(tags_collection, "Import"):
+                dotnet_info = describe_dotnet_methods(tags_collection)
+                raise RuntimeError(
+                    f"CLASSIC_TAG_IMPORT_TARGET_NOT_FOUND: "
+                    f"Tags collection (type={dotnet_info.get('dotnet_type', 'Unknown')}) "
+                    f"lacks Import() method. "
+                    f"Available Import-like methods: {dotnet_info.get('import_like_methods', [])}. "
+                    f"Available Create-like methods: {dotnet_info.get('create_like_methods', [])}."
+                )
+
             before_tags = enumerate_tag_names(tags_collection)
 
             tags_collection.Import(file_info, import_opts)
@@ -837,7 +1355,40 @@ class ClassicOpennessExecutor:
                         ),
                     ))
             else:
-                raise RuntimeError("ImportOptions.Override 不可用，禁止使用空选项替代")
+                # ImportOptions 不可用 → 尝试单参数 Import(FileInfo)
+                from backend.openness.reflection_utils import list_method_overloads
+                import_overloads = list_method_overloads(tags_collection, "Import")
+                has_single_arg = any(
+                    len(o.get("parameters", [])) == 1
+                    for o in import_overloads
+                )
+
+                if has_single_arg:
+                    tags_collection.Import(file_info)
+                    after_tags = enumerate_tag_names(tags_collection)
+                    new_tags = [t for t in after_tags if t not in before_tags]
+                    result.objects_created = len(new_tags) if new_tags else tag_count
+                    result.api_calls.append(
+                        f"TagFolder.DefaultTagTable.Tags.Import(FileInfo) "
+                        f"→ before={len(before_tags)}, after={len(after_tags)}, "
+                        f"new={new_tags}, expected={tag_names}"
+                    )
+                    # 验证
+                    if tag_names and not any(n in after_tags for n in tag_names):
+                        result.diagnostics.append(Diagnostic(
+                            code=DiagnosticCodes.IMPORT_TIA_EXCEPTION,
+                            severity=DiagnosticSeverity.WARNING,
+                            phase="P30_TAG_TABLES_AND_TAGS",
+                            message=(
+                                f"VERIFICATION_WARNING: Import(FileInfo) 未抛出异常但变量未出现。"
+                                f" expected={tag_names}, before={before_tags}, after={after_tags}"
+                            ),
+                        ))
+                else:
+                    raise RuntimeError(
+                        f"ImportOptions.Override 不可用，且无单参数 Import(FileInfo) 重载。"
+                        f"Import 重载: {import_overloads}"
+                    )
 
             result.success = True
 
@@ -858,6 +1409,654 @@ class ClassicOpennessExecutor:
                 },
             ))
             return result
+
+        return result
+
+    # ------------------------------------------------------------------
+    # V4.2: _upsert_tags_to_default_table — 逐变量创建/更新回退
+    # ------------------------------------------------------------------
+
+    def _upsert_tags_to_default_table(
+        self, hmi_software, tag_items: list[dict],
+    ) -> "ClassicStepResult":
+        """逐变量 upsert 到 DefaultTagTable（不需要 ImportOptions）。
+
+        对每个 tag_item：
+          - 已存在且 data_type 一致 → 跳过 (UPSERT_SKIP)
+          - 已存在但 data_type 不同 → 更新 (UPSERT_UPDATE)
+          - 不存在 → 创建 (UPSERT_CREATE)
+
+        参数:
+            hmi_software: HMI 软件对象。
+            tag_items: [{"name": "CMD_Start", "data_type": "Bool", "scope": "internal", ...}, ...]
+
+        返回:
+            ClassicStepResult，包含 objects_created/objects_updated 计数。
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        result = ClassicStepResult("tags", OpennessOperationKind.TIA_MUTATION)
+
+        if not tag_items:
+            result.success = True
+            result.api_calls.append("UPSERT_SKIP (no tags)")
+            return result
+
+        try:
+            tag_folder = hmi_software.TagFolder
+            default_table = tag_folder.DefaultTagTable
+            if default_table is None:
+                raise RuntimeError(
+                    "DEFAULT_TAG_TABLE_NOT_FOUND: 目标 HMI 中未找到默认变量表"
+                )
+
+            tags_collection = default_table.Tags
+
+            # V4.2: 反射检查容器能力 — TagComposition 有 Import 无 Create
+            from backend.openness.reflection_utils import has_method, describe_dotnet_methods
+            has_import = has_method(tags_collection, "Import")
+            has_create = has_method(tags_collection, "Create")
+
+            if has_import and not has_create:
+                # TagComposition 类型 → 不可用 Create，聚合失败
+                dotnet_info = describe_dotnet_methods(tags_collection)
+                tag_names = [t.get("name", "") for t in tag_items if t.get("name")]
+                result.diagnostics.append(Diagnostic(
+                    code=DiagnosticCodes.TAG_CREATE_METHOD_NOT_FOUND,
+                    severity=DiagnosticSeverity.ERROR,
+                    phase="P30_TAG_TABLES_AND_TAGS",
+                    message=(
+                        f"TagComposition (type={dotnet_info.get('dotnet_type', 'Unknown')}) "
+                        f"不支持逐变量 Create，仅支持 Import。"
+                        f"请使用 XML Import 方式导入变量，不要调用 UPSERT。"
+                        f"预期导入变量 {len(tag_names)} 个: {tag_names}"
+                    ),
+                    details=dotnet_info,
+                    remediation="This UPSERT path is unsupported for TagComposition. Use XML Import via import_hmi_tags_safe.",
+                ))
+                result.success = False
+                return result
+
+            # 枚举已有变量
+            existing_tags: dict[str, Any] = {}
+            try:
+                for tag in tags_collection:
+                    try:
+                        name = str(getattr(tag, "Name", ""))
+                        if name:
+                            existing_tags[name] = tag
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            logger.info(
+                "_upsert_tags_to_default_table: existing=%d, incoming=%d",
+                len(existing_tags), len(tag_items),
+            )
+
+            for item in tag_items:
+                name = str(item.get("name", "")).strip()
+                if not name:
+                    continue
+
+                data_type = str(item.get("data_type", "Bool")).strip()
+                scope = str(item.get("scope", "internal")).strip()
+
+                if name in existing_tags:
+                    existing = existing_tags[name]
+                    existing_dt = ""
+                    try:
+                        existing_dt = str(getattr(existing, "DataType", ""))
+                    except Exception:
+                        pass
+
+                    if existing_dt == data_type:
+                        # 一致 → 跳过
+                        result.api_calls.append(f"UPSERT_SKIP: {name}")
+                        continue
+                    else:
+                        # 不一致 → 更新
+                        try:
+                            existing.DataType = data_type
+                            result.objects_updated += 1
+                            result.api_calls.append(
+                                f"UPSERT_UPDATE: {name} ({existing_dt}→{data_type})"
+                            )
+                        except Exception as exc:
+                            result.diagnostics.append(Diagnostic(
+                                code=DiagnosticCodes.IMPORT_TIA_EXCEPTION,
+                                severity=DiagnosticSeverity.WARNING,
+                                phase="P30_TAG_TABLES_AND_TAGS",
+                                object_name=name,
+                                message=f"UPSERT 更新变量 '{name}' 失败: {exc}",
+                            ))
+                        continue
+                else:
+                    # 不存在 → 创建（先反射确认 Create 方法可用）
+                    if not tags_collection:
+                        continue
+                    from backend.openness.reflection_utils import has_method, describe_dotnet_methods
+                    if not has_method(tags_collection, "Create"):
+                        dotnet_info = describe_dotnet_methods(tags_collection)
+                        result.diagnostics.append(Diagnostic(
+                            code=DiagnosticCodes.TAG_CREATE_METHOD_NOT_FOUND,
+                            severity=DiagnosticSeverity.ERROR,
+                            phase="P30_TAG_TABLES_AND_TAGS",
+                            object_name=name,
+                            message=(
+                                f"无法创建变量 '{name}'：TagComposition "
+                                f"(type={dotnet_info.get('dotnet_type', 'Unknown')}) "
+                                f"没有 Create 方法。"
+                                f"可用 Create 类方法: {dotnet_info.get('create_like_methods', [])}. "
+                                f"可用 Import 类方法: {dotnet_info.get('import_like_methods', [])}. "
+                                f"请改用 XML Import。"
+                            ),
+                            details=dotnet_info,
+                            remediation="使用 XML Import (TagFolder.DefaultTagTable.Tags.Import) 替代 UPSERT Create。",
+                        ))
+                        result.api_calls.append(f"UPSERT_FAIL (no Create method on tags_collection): {name}")
+                        continue
+                    try:
+                        new_tag = tags_collection.Create(name, data_type)
+                        result.objects_created += 1
+                        # 设置地址（如有）
+                        addr = str(item.get("address", "")).strip()
+                        if addr:
+                            try:
+                                new_tag.Address = addr
+                            except Exception:
+                                pass
+                        # 设置连接（如有）
+                        conn = str(item.get("connection", "")).strip()
+                        if conn:
+                            try:
+                                new_tag.Connection = conn
+                            except Exception:
+                                pass
+                        result.api_calls.append(f"UPSERT_CREATE: {name}")
+                    except Exception as exc:
+                        # 检测 AttributeError 特殊处理 → 结构化诊断
+                        if isinstance(exc, AttributeError) and "Create" in str(exc):
+                            code = DiagnosticCodes.TAG_CREATE_METHOD_NOT_FOUND
+                            dotnet_info = describe_dotnet_methods(tags_collection)
+                            msg = (
+                                f"无法创建变量 '{name}'：TagComposition "
+                                f"(type={dotnet_info.get('dotnet_type', 'Unknown')}) "
+                                f"没有 Create 方法。"
+                            )
+                            details = dotnet_info
+                        else:
+                            code = DiagnosticCodes.IMPORT_TIA_EXCEPTION
+                            msg = f"UPSERT 创建变量 '{name}' 失败: {exc}"
+                            details = {
+                                "stage": "UPSERT_CREATE_TAG",
+                                "exception_chain": collect_exception_chain(exc),
+                            }
+                        result.diagnostics.append(Diagnostic(
+                            code=code,
+                            severity=DiagnosticSeverity.ERROR,
+                            phase="P30_TAG_TABLES_AND_TAGS",
+                            object_name=name,
+                            message=msg,
+                            details=details,
+                        ))
+                        continue
+
+            # 后验证
+            try:
+                after_names = set()
+                for tag in tags_collection:
+                    try:
+                        after_names.add(str(getattr(tag, "Name", "")))
+                    except Exception:
+                        pass
+                missing = sorted(
+                    [t["name"] for t in tag_items
+                     if t.get("name", "").strip() not in after_names]
+                )
+                if missing:
+                    result.diagnostics.append(Diagnostic(
+                        code=DiagnosticCodes.IMPORT_TIA_EXCEPTION,
+                        severity=DiagnosticSeverity.WARNING,
+                        phase="P30_TAG_TABLES_AND_TAGS",
+                        message=(
+                            f"UPSERT 完成但以下变量仍缺失: {missing}"
+                        ),
+                    ))
+            except Exception:
+                pass
+
+            result.success = (
+                result.objects_created > 0
+                or result.objects_updated > 0
+            )
+            if not tag_items:
+                result.success = True
+
+        except Exception as exc:
+            result.diagnostics.append(Diagnostic(
+                code=DiagnosticCodes.IMPORT_TIA_EXCEPTION,
+                severity=DiagnosticSeverity.ERROR,
+                phase="P30_TAG_TABLES_AND_TAGS",
+                message=f"_upsert_tags_to_default_table 异常: {exc}",
+                details={
+                    "stage": "UPSERT_DEFAULT_TABLE",
+                    "exception_chain": collect_exception_chain(exc),
+                    "hmi_target_type": describe_dotnet_object(hmi_software),
+                },
+            ))
+
+        return result
+
+    # ------------------------------------------------------------------
+    # V4.2: import_hmi_tags_safe — XML Import 主路径（无 UPSERT 回退）
+    # ------------------------------------------------------------------
+
+    def import_hmi_tags_safe(
+        self,
+        hmi_software,
+        tags_xml: str,
+        tag_items: list[dict] | None = None,
+    ) -> "ClassicStepResult":
+        """通过 XML Import 安全导入 HMI Tags。
+
+        策略:
+          1. 获取 DefaultTagTable.Tags 容器，反射确认 Import 方法存在。
+          2. 解析 ImportOptions（多路径探测 + assembly scan）。
+          3. 如果 ImportOptions 可用 → Import(FileInfo, ImportOptions)。
+          4. 如果 ImportOptions 不可用 → 检查单参数 Import(FileInfo) 重载。
+          5. 导入后枚举验证，缺失变量报 VERIFY_TAG_MISSING。
+          6. 禁止 UPSERT Create 回退 — TagComposition 不支持 Create。
+
+        参数:
+            hmi_software: HMI 软件对象。
+            tags_xml:     批量导出的 Tags XML 字符串。
+            tag_items:    结构化 tag 列表（仅用于提取预期变量名）。
+
+        返回:
+            ClassicStepResult，api_calls 中包含 "strategy_used=..."。
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        result = ClassicStepResult("tags", OpennessOperationKind.TIA_MUTATION)
+
+        if not tags_xml or not tags_xml.strip():
+            result.success = True
+            result.api_calls.append("SKIP (no tags)")
+            return result
+
+        expected_names = [t["name"] for t in (tag_items or []) if t.get("name")]
+
+        # Step 1: 获取 DefaultTagTable.Tags 容器
+        try:
+            tag_folder = hmi_software.TagFolder
+            default_table = tag_folder.DefaultTagTable
+            if default_table is None:
+                raise RuntimeError(
+                    "DEFAULT_TAG_TABLE_NOT_FOUND: 目标 HMI 中未找到默认变量表"
+                )
+            tags_collection = default_table.Tags
+        except Exception as e:
+            result.diagnostics.append(Diagnostic(
+                code=DiagnosticCodes.DEFAULT_TAG_TABLE_NOT_FOUND,
+                severity=DiagnosticSeverity.ERROR,
+                phase="P30_TAG_TABLES_AND_TAGS",
+                message=f"无法获取 DefaultTagTable.Tags 容器: {e}",
+                details={"exception_chain": collect_exception_chain(e)},
+            ))
+            return result
+
+        # Step 2: 反射确认 Import 方法可用
+        from backend.openness.reflection_utils import (
+            has_method, list_method_overloads, describe_dotnet_methods,
+        )
+        if not has_method(tags_collection, "Import"):
+            dotnet_info = describe_dotnet_methods(tags_collection)
+            result.diagnostics.append(Diagnostic(
+                code=DiagnosticCodes.TAG_IMPORT_METHOD_NOT_FOUND,
+                severity=DiagnosticSeverity.ERROR,
+                phase="P30_TAG_TABLES_AND_TAGS",
+                message=(
+                    f"TagComposition (type={dotnet_info.get('dotnet_type', 'Unknown')}) "
+                    f"没有 Import 方法。可用 Import 类方法: "
+                    f"{dotnet_info.get('import_like_methods', [])}。"
+                ),
+                details=dotnet_info,
+                remediation="确认 TIA Portal Openness API 可用且 HMI 设备类型正确。",
+            ))
+            return result
+
+        # Step 3: 写入临时 XML
+        temp_path = self._write_temp_xml(tags_xml, "tags_safe")
+        result.temp_files.append(temp_path)
+        file_info = self._make_file_info(temp_path)
+
+        # Step 4: 导入前枚举
+        before_tags = enumerate_tag_names(tags_collection)
+        logger.info(
+            "import_hmi_tags_safe: before=%d, expected=%s",
+            len(before_tags), expected_names,
+        )
+
+        # Step 5: 优先从 Import 方法参数类型解析 ImportOptions
+        resolution_overload = ClassicOpennessExecutor.resolve_import_option_from_overload(
+            tags_collection, preferred="Override",
+        )
+        if resolution_overload["ok"]:
+            result.api_calls.append(
+                f"resolve_import_option_from_overload: "
+                f"source={resolution_overload['source']}, "
+                f"selected={resolution_overload['selected']}, "
+                f"available={resolution_overload['available']}"
+            )
+        else:
+            logger.info(
+                "overload resolver failed, fallback to standard: %s",
+                resolution_overload.get("error"),
+            )
+
+        # Fallback: 传统解析方式
+        resolution = resolution_overload if resolution_overload["ok"] else (
+            self.resolve_import_option(preferred="Override")
+        )
+
+        if resolution["ok"]:
+            try:
+                import_opts = ClassicOpennessExecutor._make_import_options()
+                if import_opts is not None:
+                    try:
+                        # 方式 A：pythonnet 直接调用
+                        tags_collection.Import(file_info, import_opts)
+                    except Exception:
+                        # 方式 B：MethodInfo.Invoke 反射调用
+                        logger.info(
+                            "Direct Import call failed, trying MethodInfo.Invoke"
+                        )
+                        ClassicOpennessExecutor.invoke_tag_composition_import(
+                            tags_collection, temp_path, resolution,
+                        )
+                else:
+                    # _make_import_options 返回 None — 直接用 Invoke
+                    logger.info(
+                        "_make_import_options returned None, using MethodInfo.Invoke"
+                    )
+                    ClassicOpennessExecutor.invoke_tag_composition_import(
+                        tags_collection, temp_path, resolution,
+                    )
+
+                after_tags = enumerate_tag_names(tags_collection)
+                result.api_calls.append(
+                    f"TagFolder.DefaultTagTable.Tags.Import "
+                    f"(resolver={resolution['source']}, "
+                    f"selected={resolution.get('selected', '?')}) "
+                    f"→ before={len(before_tags)} after={len(after_tags)}"
+                )
+                return self._finalize_import_result(
+                    result, before_tags, after_tags, expected_names,
+                )
+            except Exception as exc:
+                logger.error("XML Import (all methods) failed: %s", exc)
+                result.diagnostics.append(Diagnostic(
+                    code=DiagnosticCodes.TAG_XML_IMPORT_FAILED,
+                    severity=DiagnosticSeverity.ERROR,
+                    phase="P30_TAG_TABLES_AND_TAGS",
+                    message=f"XML Import 失败: {exc}",
+                    details={
+                        "strategy": resolution.get("source", "unknown"),
+                        "overload_resolver": resolution_overload,
+                        "standard_resolver": resolution_overload if resolution_overload["ok"] else resolution,
+                        "exception_chain": collect_exception_chain(exc),
+                        "expected_tags": expected_names,
+                    },
+                ))
+                return result
+
+        # Step 6: ImportOptions 不可用 → 尝试单参数 Import(FileInfo)
+        import_overloads = list_method_overloads(tags_collection, "Import")
+        has_single_arg = any(
+            len(o.get("parameters", [])) == 1
+            for o in import_overloads
+        )
+        logger.info(
+            "import_hmi_tags_safe: ImportOptions unavailable, "
+            "checking single-arg Import overload. has_single_arg=%s, overloads=%s",
+            has_single_arg, import_overloads,
+        )
+
+        if has_single_arg:
+            try:
+                tags_collection.Import(file_info)
+                after_tags = enumerate_tag_names(tags_collection)
+                result.api_calls.append(
+                    f"TagFolder.DefaultTagTable.Tags.Import(FileInfo) "
+                    f"→ before={len(before_tags)} after={len(after_tags)}"
+                )
+                return self._finalize_import_result(
+                    result, before_tags, after_tags, expected_names,
+                )
+            except Exception as exc:
+                logger.error("Single-arg Import(FileInfo) failed: %s", exc)
+                result.diagnostics.append(Diagnostic(
+                    code=DiagnosticCodes.TAG_XML_IMPORT_FAILED,
+                    severity=DiagnosticSeverity.ERROR,
+                    phase="P30_TAG_TABLES_AND_TAGS",
+                    message=f"单参数 Import(FileInfo) 失败: {exc}",
+                    details={
+                        "strategy": "single_arg_import",
+                        "import_options_resolution": resolution,
+                        "import_overloads": import_overloads,
+                        "exception_chain": collect_exception_chain(exc),
+                        "expected_tags": expected_names,
+                    },
+                ))
+                return result
+
+        # Step 7: 全部失败 — 详细诊断
+        import_overloads_verbose = list_method_overloads(tags_collection, "Import")
+        result.success = False
+        result.diagnostics.append(Diagnostic(
+            code=DiagnosticCodes.TAG_XML_IMPORT_FAILED,
+            severity=DiagnosticSeverity.ERROR,
+            phase="P30_TAG_TABLES_AND_TAGS",
+            message=(
+                f"TagComposition.Import 需要 ImportOptions，但当前无法解析可用枚举值。"
+                f"预期变量 {len(expected_names)} 个: {expected_names[:5]}"
+                f"{'...' if len(expected_names) > 5 else ''}"
+            ),
+            details={
+                "tag_composition_type": "Siemens.Engineering.Hmi.Tag.TagComposition",
+                "import_overloads": import_overloads_verbose,
+                "import_option_resolution_attempts": {
+                    "import_overload_parameter": {
+                        "ok": resolution_overload.get("ok", False),
+                        "error": resolution_overload.get("error"),
+                        "available": resolution_overload.get("available", []),
+                        "method_signature": resolution_overload.get("method_signature"),
+                        "type_full_name": resolution_overload.get("type_full_name"),
+                        "diagnostics": resolution_overload.get("diagnostics", []),
+                    },
+                    "standard_resolver": {
+                        "ok": resolution.get("ok", False),
+                        "error": resolution.get("error"),
+                        "available": resolution.get("available", []),
+                        "source": resolution.get("source"),
+                        "searched_assemblies": resolution.get("searched_assemblies", []),
+                    },
+                },
+                "available_enum_names": resolution.get("available", []) or resolution_overload.get("available", []),
+                "selected_option": resolution.get("selected"),
+                "xml_path": temp_path,
+                "expected_tags": expected_names,
+            },
+            remediation=(
+                "请从 Import 方法重载第二参数类型解析 ImportOptions。"
+                "不要回退 Create/CreateFrom — TagComposition 不支持逐变量创建。"
+                "确认 TagXmlBuilder XML 格式可被 TagComposition.Import 接受。"
+            ),
+        ))
+        return result
+
+    def _finalize_import_result(
+        self,
+        result: "ClassicStepResult",
+        before_tags: list[str],
+        after_tags: list[str],
+        expected_names: list[str],
+    ) -> "ClassicStepResult":
+        """导入后验证：计算新增变量、检查缺失、设置结果状态。"""
+        new_tags = [t for t in after_tags if t not in before_tags]
+        result.objects_created = len(new_tags)
+
+        # 从 api_calls 提取策略名
+        strategy = "Import"
+        for call in result.api_calls:
+            if "ImportOptions" in call:
+                strategy = "ImportOptions.Override"
+                break
+        result.api_calls.append(
+            f"strategy_used={strategy} "
+            f"before={len(before_tags)} after={len(after_tags)} new={new_tags}"
+        )
+
+        if expected_names:
+            missing = sorted(set(expected_names) - set(after_tags))
+            if missing:
+                result.success = False
+                result.diagnostics.append(Diagnostic(
+                    code=DiagnosticCodes.VERIFY_TAG_MISSING,
+                    severity=DiagnosticSeverity.ERROR,
+                    phase="P30_TAG_TABLES_AND_TAGS",
+                    message=(
+                        f"XML Import 完成但缺失 {len(missing)} 个变量: {missing}"
+                    ),
+                    details={
+                        "expected": expected_names,
+                        "actual": sorted(after_tags),
+                        "missing": missing,
+                    },
+                ))
+                result.payload = {
+                    "imported_count": len(expected_names) - len(missing),
+                    "total_expected": len(expected_names),
+                    "missing_tags": missing,
+                }
+                return result
+
+        result.success = True
+        result.payload = {
+            "imported_count": len(expected_names) if expected_names else len(new_tags),
+            "tag_names": sorted(expected_names) if expected_names else [],
+            "missing_tags": [],
+        }
+        return result
+
+    # ------------------------------------------------------------------
+    # V4.1: _execute_import_tags — 变量导入 + 存在性验证
+    # ------------------------------------------------------------------
+
+    def _execute_import_tags(
+        self, hmi_software, tags_xml: str, expected_tag_names: list[str],
+    ) -> ClassicStepResult:
+        """导入变量到 HMI Tag Table 并验证所有变量都已成功创建。
+
+        流程:
+          1. 将 tags_xml 写入临时文件。
+          2. 使用 TIA Openness API 导入 HMI Tag Table。
+          3. 导入后查询 HMI Tag Table，确认所有 tag_names 都存在。
+          4. 如果 missing 非空，返回失败结果，不允许继续执行画面导入。
+          5. 记录 imported_count、missing_tags、tag_names。
+
+        返回:
+            ClassicStepResult, 包含 tag import 和验证结果。
+            ok=False 时后续 IMPORT_SCREEN 不执行。
+        """
+        result = ClassicStepResult("tags", OpennessOperationKind.TIA_MUTATION)
+
+        if not tags_xml.strip():
+            if expected_tag_names:
+                result.diagnostics.append(Diagnostic(
+                    code=DiagnosticCodes.VERIFY_TAG_MISSING,
+                    severity=DiagnosticSeverity.ERROR,
+                    phase="P30_TAG_TABLES_AND_TAGS",
+                    message=(
+                        f"tags_xml 为空但 expected_tag_names 非空: {expected_tag_names}。"
+                        f"无法导入变量。"
+                    ),
+                ))
+                return result
+            result.success = True
+            result.api_calls.append("SKIP (no tags)")
+            return result
+
+        # Step 1: Import tags
+        import_result = self.import_tags_to_default_table(hmi_software, tags_xml)
+        result.diagnostics.extend(import_result.diagnostics)
+        result.temp_files.extend(import_result.temp_files)
+        result.api_calls.extend(import_result.api_calls)
+
+        if not import_result.success:
+            result.diagnostics.append(Diagnostic(
+                code=DiagnosticCodes.IMPORT_TIA_EXCEPTION,
+                severity=DiagnosticSeverity.ERROR,
+                phase="P30_TAG_TABLES_AND_TAGS",
+                message="变量导入 DefaultTagTable 失败，终止部署。",
+            ))
+            return result
+
+        # Step 2: Verify all expected tags exist
+        try:
+            dt = self.read_default_tag_table(hmi_software)
+            actual_names = set(dt.get("tag_names", []))
+        except Exception as e:
+            # 如果查询不工作，退回到 TIA API 直接查询
+            actual_names = set()
+            try:
+                tag_folder = hmi_software.TagFolder
+                default_table = tag_folder.DefaultTagTable
+                if default_table:
+                    for tag in default_table.Tags:
+                        try:
+                            actual_names.add(str(tag.Name))
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        expected = set(expected_tag_names)
+        missing = sorted(expected - actual_names)
+
+        if missing:
+            result.success = False
+            result.diagnostics.append(Diagnostic(
+                code=DiagnosticCodes.VERIFY_TAG_MISSING,
+                severity=DiagnosticSeverity.ERROR,
+                phase="P30_TAG_TABLES_AND_TAGS",
+                message=(
+                    f"HMI tag import 不完整。导入后缺失 {len(missing)} 个变量: {missing}"
+                ),
+                details={
+                    "expected_count": len(expected),
+                    "actual_count": len(actual_names),
+                    "missing_tags": missing,
+                    "expected": sorted(expected),
+                    "actual": sorted(actual_names),
+                },
+            ))
+            result.payload = {
+                "expected_count": len(expected),
+                "actual_count": len(actual_names),
+                "missing_tags": missing,
+            }
+        else:
+            result.success = True
+            result.objects_created = len(expected)
+            result.payload = {
+                "imported_count": len(expected),
+                "tag_names": sorted(expected),
+            }
 
         return result
 

@@ -1,0 +1,33 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Document xmlns="http://www.siemens.com/automation/SimaticML">
+  <Engineering version="V18"/>
+  <Screen ID="c24ce62c-16f8-4045-8045-f9af7acfa5ca" Name="Test_Screen">
+    <AttributeList>
+      <Name>Test_Screen</Name>
+      <DisplayName>Test_Screen</DisplayName>
+      <Width>1280</Width>
+      <Height>800</Height>
+    </AttributeList>
+    <ObjectList>
+      <ScreenItem ID="035915c8-816d-4135-8433-4e5f300245f5" Name="TXT_A" Type="TextField">
+      <Geometry>
+      <X>24</X>
+      <Y>20</Y>
+      <Width>200</Width>
+      <Height>40</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>dd3cdcc1-e2de-48d3-8d62-0dc32268b124</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">A</Text>
+</MultilingualText>
+      </Text>
+      <FontSize>18</FontSize>
+      <Bold>false</Bold>
+      <ForeColor>230,237,243</ForeColor>
+      </Properties>
+      </ScreenItem>
+    </ObjectList>
+  </Screen>
+</Document>

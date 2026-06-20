@@ -115,6 +115,43 @@ def build_generation_summary(
     deployment = {}
     if deployment_result:
         dep = deployment_result
+        details = dep.get("details", {})
+
+        # V4.1: P30 tag import summary
+        p30_tags = {}
+        step_results = details.get("step_results", [])
+        tag_step = next((s for s in step_results if "P30" in s.get("phase", "") or s.get("step_key") == "tags"), None)
+        if tag_step:
+            payload = tag_step.get("payload", {})
+            p30_tags = {
+                "status": "ok" if tag_step.get("success") else "failed",
+                "generated": dep.get("summary", {}).get("tags_created", 0),
+                "imported": payload.get("imported_count", tag_step.get("objects_created", 0)),
+                "missing": payload.get("missing_tags", []),
+            }
+        else:
+            p30_tags = {
+                "status": "missing",
+                "generated": dep.get("summary", {}).get("tags_created", 0),
+                "imported": 0,
+                "missing": [],
+            }
+
+        # P50 screen import summary
+        p50_screen = {}
+        screen_step = next((s for s in step_results if "P50" in s.get("phase", "") or s.get("step_key") == "screens"), None)
+        if screen_step:
+            p50_screen = {
+                "status": "ok" if screen_step.get("success") else "failed",
+            }
+        else:
+            p50_screen = {"status": "unknown"}
+
+        # P80 verify summary
+        p80_verify = {
+            "status": "ok" if dep.get("verification", {}).get("success", False) else "failed_or_skipped",
+        }
+
         deployment = {
             "status": dep.get("status", "unknown"),
             "tags_imported": dep.get("summary", {}).get("tags_created", 0) > 0,
@@ -127,6 +164,9 @@ def build_generation_summary(
             "screens_created": dep.get("summary", {}).get("screens_created", 0),
             "diagnostics_count": len(dep.get("diagnostics", [])),
             "error_count": len([d for d in dep.get("diagnostics", []) if d.get("severity") == "error"]),
+            "p30_tags": p30_tags,
+            "p50_screen": p50_screen,
+            "p80_verify": p80_verify,
         }
 
     return {

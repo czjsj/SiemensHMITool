@@ -1,0 +1,33 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Document xmlns="http://www.siemens.com/automation/SimaticML">
+  <Engineering version="V16"/>
+  <Screen ID="1468698d-5574-4918-8c1e-720245563844" Name="Test_Import">
+    <AttributeList>
+      <Name>Test_Import</Name>
+      <DisplayName>Test_Import</DisplayName>
+      <Width>1280</Width>
+      <Height>800</Height>
+    </AttributeList>
+    <ObjectList>
+      <ScreenItem ID="51837d63-9d21-4e9d-9e60-443f6493d0b6" Name="TXT_A" Type="TextField">
+      <Geometry>
+      <X>24</X>
+      <Y>20</Y>
+      <Width>200</Width>
+      <Height>40</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>3b8cf671-ffa3-46cc-99e9-1a8a5e103f88</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">A</Text>
+</MultilingualText>
+      </Text>
+      <FontSize>18</FontSize>
+      <Bold>false</Bold>
+      <ForeColor>230,237,243</ForeColor>
+      </Properties>
+      </ScreenItem>
+    </ObjectList>
+  </Screen>
+</Document>

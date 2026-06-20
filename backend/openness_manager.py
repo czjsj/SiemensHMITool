@@ -971,10 +971,15 @@ class OpennessManager:
         compiler.Compile()
 
     # ------------------------------------------------------------------
-    # 变量表同步（VariableEngine 集成）
+    # 变量表同步（VariableEngine 集成）— V4.2 家族感知路由
     # ------------------------------------------------------------------
     def sync_tags(self, tags: list) -> dict:
         """将 HMI Tags 自动写入 TIA Portal 项目的 HMI 变量表。
+
+        V4.2: 重构为家族感知路由。不再硬编码 sw.TagTables，改为：
+          - Classic (Basic/Comfort) → TagXmlBuilder + ClassicOpennessExecutor.import_tags_to_default_table
+          - Unified → UnifiedOpennessExecutor.create_tags
+          - Unknown → 反射探测 + 结构化诊断
 
         参数:
             tags: IR 中的 tags 数组，每项含 name/data_type/address/comment。
@@ -994,82 +999,290 @@ class OpennessManager:
                 result["errors"].append("未找到 HMI 设备。")
                 return result
 
-            # 获取或创建默认变量表
-            try:
-                tag_tables = list(sw.TagTables)
-                if tag_tables:
-                    table = tag_tables[0]
-                else:
-                    table = sw.TagTables.Create("Default tag table")
-                    result["created"].append("已创建默认变量表 'Default tag table'")
-            except Exception as e:
-                # 某些 TIA 版本中 TagTables 可能不在 HmiTarget 直接层级
-                # 尝试从 HmiTarget 获取
-                try:
-                    table = sw.TagTables[0]
-                except Exception:
-                    result["errors"].append(
-                        f"无法访问 HMI 变量表：{e}。"
-                        f"请确认 HMI 设备已正确配置。"
-                    )
-                    return result
+            # V4.2: 探测对象 .NET 类型用于诊断
+            sw_type = _net_type_name(sw)
 
-            # 收集已有变量名（避免重复创建）
-            existing_names = set()
-            try:
-                for tag in table.Tags:
-                    try:
-                        existing_names.add(str(tag.Name))
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+            # V4.2: 识别 HMI 家族（Basic/Comfort/Unified/Unknown）
+            caps = self.get_hmi_capabilities()
+            hmi_family = caps.get("hmi_family", "Unknown")
 
+            # V4.2: Unknown family 立即阻断，不探测容器
+            if hmi_family not in ("Basic", "Comfort", "Classic", "Unified"):
+                from backend.domain.diagnostics import Diagnostic, DiagnosticCodes
+                from backend.domain.enums import DiagnosticSeverity
+
+                sw_info = _describe_dotnet_object_safe(sw)
+                diag = Diagnostic(
+                    code=DiagnosticCodes.HMI_FAMILY_UNKNOWN,
+                    severity=DiagnosticSeverity.ERROR,
+                    phase="P30_TAG_TABLES_AND_TAGS",
+                    message=(
+                        f"HMI family is '{hmi_family}'. "
+                        f"Cannot import tags for unknown HMI type. "
+                        f"Object type: {sw_info.get('dotnet_full_name', sw_type)}. "
+                        f"Available properties: {sw_info.get('properties', {})}."
+                    ),
+                    details={
+                        "sw_type": sw_type,
+                        "hmi_family": hmi_family,
+                        "detected_family_info": sw_info,
+                    },
+                    remediation=(
+                        "Specify hmi_defaults.hmi_type as 'basic', 'comfort', or 'unified', "
+                        "or connect to a supported HMI device."
+                    ),
+                )
+                result["errors"].append(f"[{diag.code}] {diag.message}")
+                return result
+
+            # V4.2: 反射探测变量容器，获取已有变量名
+            container = _resolve_hmi_tag_container(sw, hmi_family)
+            if not container["ok"]:
+                for d in container["diagnostics"]:
+                    result["errors"].append(d)
+                return result
+
+            existing_names = container["existing_names"]
+            access_path = container["access_path"]
+
+            # 过滤已存在的变量
+            skipped: list[str] = []
+            new_tags: list[dict] = []
             for t in tags:
                 name = str(t.get("name", "")).strip()
                 if not name:
                     continue
                 if name in existing_names:
-                    result["skipped"].append(name)
-                    continue
+                    skipped.append(name)
+                else:
+                    new_tags.append(t)
 
-                data_type = str(t.get("data_type", "Bool")).strip()
-                # TIA 中数据类型名称映射
-                tia_type_map = {
-                    "Bool": "Bool", "Int": "Int", "DInt": "DInt",
-                    "Real": "Real", "Word": "Word", "String": "String",
-                }
-                tia_type = tia_type_map.get(data_type, "Bool")
+            result["skipped"] = skipped
 
-                try:
-                    new_tag = table.Tags.Create(name, tia_type)
-                    # 设置地址（如有）
-                    address = str(t.get("address", "")).strip()
-                    if address:
-                        try:
-                            new_tag.Address = address
-                        except Exception:
-                            pass
-                    # 设置注释（如有）
-                    comment = str(t.get("comment", "")).strip()
-                    if comment:
-                        try:
-                            new_tag.Comment = comment
-                        except Exception:
-                            pass
-                    result["created"].append(name)
-                    existing_names.add(name)
-                except Exception as e:
-                    result["errors"].append(f"创建变量 '{name}' 失败：{e}")
+            if not new_tags:
+                result["ok"] = len(skipped) > 0
+                if not result["ok"] and not result["errors"]:
+                    result["errors"].append("没有可创建的变量。")
+                return result
 
-            result["ok"] = len(result["created"]) > 0 or len(result["skipped"]) > 0
-            if not result["ok"] and not result["errors"]:
-                result["errors"].append("没有可创建的变量。")
+            # V4.2: 根据家族路由到正确的 executor
+            if hmi_family in ("Basic", "Comfort", "Classic"):
+                # 经典路径：TagXmlBuilder 生成 XML + import_hmi_tags_safe（XML Import 主路径）
+                from backend.openness.classic_executor import ClassicOpennessExecutor
+                from backend.backends.classic.tag_xml_builder import TagXmlBuilder
+                from backend.domain.ir_v2 import TagSpec
+                from backend.domain.enums import TagScope
+
+                tag_specs = []
+                tag_items: list[dict] = []
+                for t in new_tags:
+                    name = str(t.get("name", "")).strip()
+                    data_type = str(t.get("data_type", "Bool")).strip()
+                    addr = str(t.get("address", "")).strip()
+                    scope = TagScope.EXTERNAL if addr else TagScope.INTERNAL
+
+                    spec = TagSpec(
+                        name=name,
+                        data_type=data_type,
+                        scope=scope,
+                        table="DefaultTagTable",
+                    )
+                    if addr:
+                        spec.address = addr
+                    tag_specs.append(spec)
+
+                    # 构建 tag_items 用于预期变量名列表
+                    item: dict = {
+                        "name": name,
+                        "data_type": data_type,
+                        "scope": "external" if addr else "internal",
+                    }
+                    if addr:
+                        item["address"] = addr
+                    conn = str(t.get("connection", "")).strip()
+                    if conn:
+                        item["connection"] = conn
+                    tag_items.append(item)
+
+                xml_builder = TagXmlBuilder()
+                tags_xml = xml_builder.build_tags_batch_export_xml(
+                    tag_specs, table_name="DefaultTagTable",
+                )
+                executor = ClassicOpennessExecutor()
+                # V4.2: XML Import 主路径（无 UPSERT Create 回退）
+                step_result = executor.import_hmi_tags_safe(sw, tags_xml, tag_items)
+
+                if step_result.success:
+                    result["created"] = [t["name"] for t in new_tags]
+                    result["ok"] = True
+                else:
+                    # 检查 payload 中的部分成功信息
+                    payload = getattr(step_result, "payload", None) or {}
+                    missing_tags = payload.get("missing_tags", [])
+                    imported_count = payload.get("imported_count", 0)
+                    if imported_count > 0:
+                        result["created"] = [
+                            n for n in [t["name"] for t in new_tags]
+                            if n not in missing_tags
+                        ]
+                        result["ok"] = True if result["created"] else False
+                    for d in step_result.diagnostics:
+                        result["errors"].append(
+                            f"[{d.code}] {d.message}"
+                        )
+
+            elif hmi_family == "Unified":
+                # Unified 路径：UnifiedOpennessExecutor.create_tags
+                from backend.openness.unified_executor import UnifiedOpennessExecutor
+
+                specs = [
+                    {
+                        "name": str(t.get("name", "")).strip(),
+                        "data_type": str(t.get("data_type", "Bool")).strip(),
+                    }
+                    for t in new_tags
+                ]
+                executor = UnifiedOpennessExecutor()
+                step_result = executor.create_tags(sw, specs)
+
+                if step_result.success:
+                    result["created"] = [t["name"] for t in new_tags]
+                    result["ok"] = True
+                else:
+                    for d in step_result.diagnostics:
+                        result["errors"].append(
+                            f"[{d.code}] {d.message}"
+                        )
+
+            else:
+                # Unknown HMI family — BLOCK, do not guess API
+                from backend.domain.diagnostics import Diagnostic, DiagnosticCodes
+                from backend.domain.enums import DiagnosticSeverity
+
+                sw_info = _describe_dotnet_object_safe(sw)
+                diag = Diagnostic(
+                    code=DiagnosticCodes.HMI_FAMILY_UNKNOWN,
+                    severity=DiagnosticSeverity.ERROR,
+                    phase="P30_TAG_TABLES_AND_TAGS",
+                    message=(
+                        f"HMI family is '{hmi_family}'. "
+                        f"Cannot import tags for unknown HMI type. "
+                        f"Object type: {sw_info.get('dotnet_full_name', sw_type)}. "
+                        f"Available properties: {sw_info.get('properties', {})}."
+                    ),
+                    details={
+                        "sw_type": sw_type,
+                        "hmi_family": hmi_family,
+                        "detected_family_info": sw_info,
+                    },
+                    remediation=(
+                        "Specify hmi_defaults.hmi_type as 'basic', 'comfort', or 'unified', "
+                        "or connect to a supported HMI device."
+                    ),
+                )
+                result["errors"].append(f"[{diag.code}] {diag.message}")
 
         except Exception as e:
             result["errors"].append(f"同步变量表异常：{e}")
 
         return result
+
+    def _verify_hmi_tags_exist(self, tag_names: list[str]) -> None:
+        """验证所有 tag names 在 HMI Tag Table 中存在。
+
+        V4.2: 重构为家族感知验证。不再硬编码 sw.TagTables，改为：
+          - Classic → ClassicOpennessExecutor.read_default_tag_table
+          - Unified → sw.Tags 直接枚举
+          - Unknown → 反射探测 + 结构化 ValueError
+
+        如果缺失，抛出 ValueError，后续画面导入被阻断。
+        """
+        if not tag_names or not self._project:
+            return
+
+        sw = self._find_hmi_software()
+        if sw is None:
+            raise ValueError("无法定位 HMI 设备以验证变量。")
+
+        caps = self.get_hmi_capabilities()
+        hmi_family = caps.get("hmi_family", "Unknown")
+        sw_type = _net_type_name(sw)
+
+        existing_names: set[str] = set()
+
+        if hmi_family in ("Basic", "Comfort", "Classic"):
+            # 经典路径：ClassicOpennessExecutor 读取 DefaultTagTable
+            try:
+                from backend.openness.classic_executor import ClassicOpennessExecutor
+                executor = ClassicOpennessExecutor()
+                dt = executor.read_default_tag_table(sw)
+                if dt.get("success"):
+                    existing_names = set(dt.get("tag_names", []))
+                else:
+                    # Fallback: 直接反射读取
+                    container = _resolve_hmi_tag_container(sw, hmi_family)
+                    if container["ok"]:
+                        existing_names = container["existing_names"]
+                    else:
+                        raise ValueError(
+                            f"无法验证 Classic HMI 变量: {dt.get('error', '未知错误')}。"
+                            f"对象类型: {sw_type}，"
+                            f"诊断: {container.get('diagnostics', [])}"
+                        )
+            except ValueError:
+                raise
+            except Exception as e:
+                # Fallback: 直接反射
+                container = _resolve_hmi_tag_container(sw, hmi_family)
+                if container["ok"]:
+                    existing_names = container["existing_names"]
+                else:
+                    raise ValueError(
+                        f"无法验证 Classic HMI 变量: {e}。"
+                        f"对象类型: {sw_type}，"
+                        f"已尝试路径: TagFolder.DefaultTagTable.Tags"
+                    )
+
+        elif hmi_family == "Unified":
+            # Unified 路径：sw.Tags 直接集合
+            tags_coll = _try_get_attr(sw, "Tags")
+            if tags_coll is not None:
+                from backend.openness.diagnostics_utils import enumerate_tag_names
+                existing_names = set(enumerate_tag_names(tags_coll))
+            else:
+                probed = {}
+                for attr in ("Tags", "TagFolder", "Screens"):
+                    probed[attr] = _try_get_attr(sw, attr) is not None
+                raise ValueError(
+                    f"无法验证 Unified HMI 变量：hmiSoftware.Tags 不可用。"
+                    f"对象类型: {sw_type}，"
+                    f"可用属性探测: {probed}。"
+                    f"请确认当前传入的是 Unified hmi_software 对象。"
+                )
+
+        else:
+            # 未知家族：反射探测所有可能路径
+            container = _resolve_hmi_tag_container(sw, hmi_family)
+            if container["ok"]:
+                existing_names = container["existing_names"]
+            else:
+                probed = {}
+                for attr in ("TagFolder", "TagTables", "Tags"):
+                    probed[attr] = _try_get_attr(sw, attr) is not None
+                raise ValueError(
+                    f"无法验证 HMI 变量：未知的 HMI 家族 '{hmi_family}'。"
+                    f"当前对象类型为 {sw_type}，"
+                    f"已尝试路径: hmiSoftware.Tags / TagFolder.DefaultTagTable.Tags，"
+                    f"可用属性探测: {probed}。"
+                    f"请确认当前传入的是 hmi_software 对象，而不是 target/capability wrapper。"
+                )
+
+        missing = sorted(set(tag_names) - existing_names)
+        if missing:
+            raise ValueError(
+                f"HMI Tag Table 中缺失以下变量: {missing}。"
+                f"变量导入未完全成功，禁止继续导入画面。"
+            )
 
     # ------------------------------------------------------------------
     # 6.1.1 HMI 类型识别
@@ -1616,6 +1829,9 @@ class OpennessManager:
     def import_or_generate_from_ir(self, ir: dict, mode: str = "auto") -> dict:
         """统一入口：根据 HMI 类型和用户选择的模式，自动路由到对应生成路线。
 
+        V4.1 修复：变量导入必须在画面导入之前。
+        流程: normalize → validate → VariableEngine.generate → sync_tags → verify → import screen
+
         参数:
             ir: 校验后的 HMI 画面 IR。
             mode: 生成模式 — auto | unified_direct | classic_template_xml | simaticml。
@@ -1623,9 +1839,22 @@ class OpennessManager:
         返回:
             {"ok": True, "mode": "...", "hmi_type": "...", "screen_name": "...", ...}
         """
+        from .hmi_ir import validate_ir as _validate
+        from .tag_binding_normalizer import (
+            normalize_legacy_tag_bindings,
+            assert_legacy_tags_complete,
+        )
+
         meta = ir.get("meta", {})
         screen_name = meta.get("screen_name", "Screen_1")
-        from .hmi_ir import validate_ir as _validate
+
+        # V4.1: Step 0 — normalize before validation
+        try:
+            ir = normalize_legacy_tag_bindings(ir)
+        except ValueError as e:
+            return {"ok": False, "error": f"变量绑定规范化失败：{e}",
+                    "mode": mode, "hmi_type": "Unknown",
+                    "screen_name": screen_name, "warnings": [], "details": {}}
 
         try:
             ir = _validate(ir)
@@ -1633,6 +1862,51 @@ class OpennessManager:
             return {"ok": False, "error": f"IR 校验失败：{e}",
                     "mode": mode, "hmi_type": "Unknown",
                     "screen_name": screen_name, "warnings": [], "details": {}}
+
+        # V4.1: Step 0.5 — re-normalize after validation
+        try:
+            ir = normalize_legacy_tag_bindings(ir)
+        except ValueError as e:
+            return {"ok": False, "error": f"校验后变量规范化失败：{e}",
+                    "mode": mode, "hmi_type": "Unknown",
+                    "screen_name": screen_name, "warnings": [], "details": {}}
+
+        # V4.1: Step 0.6 — VariableEngine.generate to fill missing tags
+        from .variable_engine import VariableEngine
+        engine = VariableEngine()
+        try:
+            ir = engine.generate(ir)
+        except Exception as e:
+            return {"ok": False, "error": f"VariableEngine.generate 失败：{e}",
+                    "mode": mode, "hmi_type": "Unknown",
+                    "screen_name": screen_name, "warnings": [], "details": {}}
+
+        # V4.1: Step 0.7 — assert tags complete
+        try:
+            assert_legacy_tags_complete(ir)
+        except ValueError as e:
+            return {"ok": False, "error": f"变量不完整，终止画面导入：{e}",
+                    "mode": mode, "hmi_type": "Unknown",
+                    "screen_name": screen_name, "warnings": [], "details": {}}
+
+        # V4.1: Step 0.8 — sync_tags before any screen import
+        tag_sync_result = None
+        tag_names = [t.get("name", "") for t in ir.get("tags", []) if t.get("name")]
+        if tag_names and self._project:
+            tag_sync_result = self.sync_tags(ir.get("tags", []))
+            if not tag_sync_result.get("ok"):
+                return {
+                    "ok": False,
+                    "mode": mode,
+                    "hmi_type": "Unknown",
+                    "screen_name": screen_name,
+                    "message": f"HMI 变量同步失败，终止画面导入。错误: {tag_sync_result.get('errors', [])}",
+                    "warnings": [],
+                    "details": {"tag_sync": tag_sync_result},
+                }
+
+            # Verify tags exist after sync
+            self._verify_hmi_tags_exist(tag_names)
 
         caps = self.get_hmi_capabilities()
         is_basic = bool(caps.get("is_basic"))
@@ -1732,17 +2006,11 @@ class OpennessManager:
                             import_option=tmpl_cfg.get("import_option", "Override"),
                         )
 
-                        # ---- 自动同步 HMI 变量表 ----
-                        tag_sync_result = None
-                        if import_result.get("imported") and ir.get("tags"):
-                            try:
-                                tag_sync_result = self.sync_tags(ir["tags"])
-                                if tag_sync_result.get("created"):
-                                    warnings.append(
-                                        f"已同步 {len(tag_sync_result['created'])} 个变量到 HMI 变量表"
-                                    )
-                            except Exception as sync_e:
-                                warnings.append(f"HMI 变量表同步异常：{sync_e}")
+                        # V4.1: tags 已在入口处同步，此处仅附加 tag_sync 到结果
+                        if tag_sync_result and tag_sync_result.get("created"):
+                            warnings.append(
+                                f"已同步 {len(tag_sync_result['created'])} 个变量到 HMI 变量表"
+                            )
 
                         return {
                             "ok": import_result.get("imported", False),
@@ -1803,17 +2071,11 @@ class OpennessManager:
 
             import_result = self.import_screen(xml_path)
 
-            # ---- 自动同步 HMI 变量表 ----
-            tag_sync_result = None
-            if import_result.get("imported") and ir.get("tags"):
-                try:
-                    tag_sync_result = self.sync_tags(ir["tags"])
-                    if tag_sync_result.get("created"):
-                        warnings.append(
-                            f"已同步 {len(tag_sync_result['created'])} 个变量到 HMI 变量表"
-                        )
-                except Exception as sync_e:
-                    warnings.append(f"HMI 变量表同步异常：{sync_e}")
+            # V4.1: tags 已在入口处同步
+            if tag_sync_result and tag_sync_result.get("created"):
+                warnings.append(
+                    f"已同步 {len(tag_sync_result['created'])} 个变量到 HMI 变量表"
+                )
 
             return {
                 "ok": import_result.get("imported", False),
@@ -2272,6 +2534,129 @@ class OpennessManager:
 
 
 # ========================================================================
+# V4.2: HMI 变量容器解析 — 反射探测 + 家族感知路由
+# ========================================================================
+
+def _resolve_hmi_tag_container(sw, hmi_family: str) -> dict:
+    """解析 HMI 变量容器，根据 HMI 家族返回正确的 Tag API 路径。
+
+    不再硬编码 sw.TagTables。改为通过 _try_get_attr 反射探测可用属性，
+    并根据 HMI 家族 (Basic/Comfort/Classic/Unified) 选择正确的变量集合。
+
+    参数:
+        sw: TIA HMI software 对象（真实 .NET 对象，来自 _find_hmi_software()）。
+        hmi_family: HMI 家族字符串 ("Basic", "Comfort", "Classic", "Unified", "Unknown")。
+
+    返回:
+        {
+            "ok": bool,
+            "family": str,
+            "access_path": str,          # 实际使用的 API 路径（用于诊断）
+            "existing_names": set[str],  # 已存在的变量名集合
+            "diagnostics": [str],        # 诊断消息列表
+        }
+    """
+    from backend.openness.diagnostics_utils import enumerate_tag_names
+
+    result: dict = {
+        "ok": False,
+        "family": hmi_family,
+        "access_path": "",
+        "existing_names": set(),
+        "diagnostics": [],
+    }
+
+    if hmi_family in ("Basic", "Comfort", "Classic"):
+        # --- Classic 路径 ---
+        # 优先: TagFolder.DefaultTagTable.Tags
+        tag_folder = _try_get_attr(sw, "TagFolder")
+        if tag_folder is not None:
+            default_table = _try_get_attr(tag_folder, "DefaultTagTable")
+            if default_table is not None:
+                tags_coll = _try_get_attr(default_table, "Tags")
+                if tags_coll is not None:
+                    result["existing_names"] = set(enumerate_tag_names(tags_coll))
+                    result["access_path"] = "TagFolder.DefaultTagTable.Tags"
+                    result["ok"] = True
+                    return result
+
+            # Fallback: TagFolder.TagTables[0]
+            tag_tables = _try_get_attr(tag_folder, "TagTables")
+            if tag_tables is not None:
+                try:
+                    table_list = list(tag_tables)
+                    if table_list:
+                        tags_coll = _try_get_attr(table_list[0], "Tags")
+                        if tags_coll is not None:
+                            result["existing_names"] = set(
+                                enumerate_tag_names(tags_coll)
+                            )
+                            result["access_path"] = "TagFolder.TagTables[0].Tags"
+                            result["ok"] = True
+                            return result
+                except Exception:
+                    pass
+
+        # Fallback: sw.TagTables 直接访问（某些 TIA 版本）
+        direct_tables = _try_get_attr(sw, "TagTables")
+        if direct_tables is not None:
+            try:
+                table_list = list(direct_tables)
+                if table_list:
+                    tags_coll = _try_get_attr(table_list[0], "Tags")
+                    if tags_coll is not None:
+                        result["existing_names"] = set(
+                            enumerate_tag_names(tags_coll)
+                        )
+                        result["access_path"] = "sw.TagTables[0].Tags (direct)"
+                        result["ok"] = True
+                        return result
+            except Exception:
+                pass
+
+        # 全部失败 — 返回结构化诊断
+        result["diagnostics"].append(
+            f"无法解析 Classic HMI 变量容器。"
+            f"对象类型: {_net_type_name(sw)}，"
+            f"HMI family: {hmi_family}，"
+            f"已尝试路径: TagFolder.DefaultTagTable.Tags, "
+            f"TagFolder.TagTables[0].Tags, sw.TagTables[0]"
+        )
+        return result
+
+    elif hmi_family == "Unified":
+        # --- Unified 路径：hmiSoftware.Tags 直接集合 ---
+        tags_coll = _try_get_attr(sw, "Tags")
+        if tags_coll is not None:
+            result["existing_names"] = set(enumerate_tag_names(tags_coll))
+            result["access_path"] = "hmiSoftware.Tags (Unified direct)"
+            result["ok"] = True
+        else:
+            result["diagnostics"].append(
+                f"无法解析 Unified HMI 变量容器。"
+                f"对象类型: {_net_type_name(sw)}，"
+                f"HMI family: {hmi_family}，"
+                f"已尝试路径: hmiSoftware.Tags"
+            )
+        return result
+
+    else:
+        # --- 未知家族：反射探测所有已知路径 ---
+        probed: dict[str, bool] = {}
+        for attr in ("TagFolder", "TagTables", "Tags"):
+            probed[attr] = _try_get_attr(sw, attr) is not None
+        result["diagnostics"].append(
+            f"无法解析 HMI 变量容器：未知的 HMI 家族 '{hmi_family}'。"
+            f"当前对象类型为 {_net_type_name(sw)}，"
+            f"已尝试路径: {[attr for attr, ok in probed.items()]}，"
+            f"可用属性探测结果: {probed}。"
+            f"请确认当前传入的是 hmi_software 对象，"
+            f"而不是 target/capability wrapper。"
+        )
+        return result
+
+
+# ========================================================================
 # 模块级辅助函数：Unified 对象反射操作
 # ========================================================================
 
@@ -2281,6 +2666,26 @@ def _net_type_name(obj) -> str:
         return type(obj).FullName or type(obj).__name__
     except Exception:
         return type(obj).__name__
+
+
+def _describe_dotnet_object_safe(obj) -> dict:
+    """安全描述 .NET 对象以生成诊断信息。绝不抛出。"""
+    if obj is None:
+        return {"dotnet_full_name": "None", "properties": {}}
+    info: dict = {}
+    try:
+        info["dotnet_full_name"] = str(obj.GetType().FullName)
+    except Exception:
+        info["dotnet_full_name"] = type(obj).__name__
+    info["properties"] = {}
+    for attr in ("TagFolder", "TagTables", "Tags", "ScreenFolder", "Name"):
+        try:
+            v = getattr(obj, attr, None)
+            if v is not None:
+                info["properties"][attr] = str(type(v).__name__)
+        except Exception:
+            info["properties"][attr] = "<error reading>"
+    return info
 
 
 def _try_get_attr(obj, name: str):

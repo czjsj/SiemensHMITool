@@ -42,6 +42,14 @@ from .domain.enums import (
 from .domain.legacy_adapter import LegacyIrAdapter
 from .domain.diagnostics import Diagnostic, DiagnosticCodes
 from .domain.enums import DiagnosticSeverity
+from .tag_binding_normalizer import (
+    normalize_legacy_tag_bindings,
+    assert_legacy_tags_complete,
+)
+from .validation.tag_binding_gate import (
+    validate_project_tag_bindings,
+    raise_if_project_tag_bindings_invalid,
+)
 
 # ---------------------------------------------------------------------------
 # 变量命名规则 — 前缀映射
@@ -227,17 +235,27 @@ class VariableEngine:
         """主入口（旧兼容）：为 IR 中的所有对象自动生成变量绑定。
 
         内部流程：
-          1. 调用 enrich() 获取 HmiProjectSpec
-          2. 回填 legacy IR 字段（process_tag, scripts 等）
-          3. 生成 VBS 脚本（仅用于旧版 compatibility）
+          1. normalize_legacy_tag_bindings(ir) — 统一变量字段
+          2. 调用 enrich() 获取 HmiProjectSpec
+          3. raise_if_project_tag_bindings_invalid(project) — 校验 tag 完整性
+          4. 回填 legacy IR 字段（process_tag, scripts 等）
+          5. normalize_legacy_tag_bindings(legacy) — 二次规范化
+          6. assert_legacy_tags_complete(legacy) — 断言完整性
+          7. 生成 VBS 脚本（仅用于旧版 compatibility）
 
-        返回修改后的 IR（原地修改 + 返回引用）。
+        返回修改后的 IR（深拷贝 + 修改 + 返回引用）。
         """
         objects = ir.get("objects") or []
         if not objects:
             return ir
 
+        # V4.1: Step 0 — 入口规范化
+        ir = normalize_legacy_tag_bindings(ir)
+
         project = self.enrich(ir)
+
+        # V4.1: 校验 project 的 tag 完整性
+        raise_if_project_tag_bindings_invalid(project)
 
         # ---- 回填旧 IR 字段 ----
         existing_tags: Dict[str, dict] = {}
@@ -265,6 +283,11 @@ class VariableEngine:
                     if obj.get("id") == oid:
                         if item.tag_binding and not obj.get("process_tag"):
                             obj["process_tag"] = item.tag_binding
+                        # 同步 binding.tag
+                        if item.tag_binding:
+                            obj.setdefault("binding", {})
+                            obj["binding"]["tag"] = item.tag_binding
+                            obj["tag_binding"] = item.tag_binding
                         self._backfill_legacy_scripts(
                             obj, oid, item,
                             existing_scripts, new_scripts_for_legacy,
@@ -318,11 +341,48 @@ class VariableEngine:
             )
         ir["_variable_engine_applied"] = True
 
+        # V4.1: 二次规范化 + 完整性断言
+        ir = normalize_legacy_tag_bindings(ir)
+        assert_legacy_tags_complete(ir)
+
         return ir
 
     # ------------------------------------------------------------------
     # enrich 辅助方法 — 语义模型推断
     # ------------------------------------------------------------------
+
+    def _find_existing_binding(self, item: ScreenItemSpec) -> str | None:
+        """查找 item 上已有的变量绑定，避免生成重复自动变量。"""
+        # 1. 检查 tag_binding
+        if item.tag_binding and item.tag_binding.strip():
+            return item.tag_binding.strip()
+        # 2. 检查 bindings 中的 source_tag
+        for binding in item.bindings:
+            if binding.source_tag and binding.source_tag.strip():
+                return binding.source_tag.strip()
+        # 3. 检查 events 中 actions 引用的 tag
+        for event in item.events:
+            for action in event.actions:
+                if action.tag and action.tag.strip():
+                    return action.tag.strip()
+        return None
+
+    def _make_tag_spec(self, name: str, data_type: str, oid: str,
+                       existing_tags: dict, new_tags: list):
+        """创建 TagSpec（如果名称不重复）。"""
+        if name in existing_tags:
+            return None
+        from backend.domain.ir_v2 import TagSpec
+        from backend.domain.enums import TagScope
+        ts = TagSpec(
+            name=name,
+            table="DefaultTagTable",
+            scope=TagScope.EXTERNAL if self.plc_prefix else TagScope.INTERNAL,
+            data_type=data_type,
+            address=self._make_address(name) if self.plc_prefix else None,
+            comment={"zh-CN": f"已存在绑定 — {oid}"},
+        )
+        return ts
 
     def _enrich_button(
         self,
@@ -332,6 +392,19 @@ class VariableEngine:
         new_tags: list,
     ):
         """为 Button 推断 TagSpec、EventSpec、ActionSpec。"""
+
+        # V4.2: 先检查已有绑定，避免生成重复自动变量
+        existing_tag = self._find_existing_binding(item)
+        if existing_tag:
+            # 已有绑定 → 复用，不自动生成
+            item.tag_binding = existing_tag
+            if existing_tag not in existing_tags:
+                ts = self._make_tag_spec(existing_tag, "Bool", oid, existing_tags, new_tags)
+                if ts:
+                    new_tags.append(ts)
+                    existing_tags[existing_tag] = ts
+            return
+
         is_toggle = self._detect_toggle_from_item(item, oid)
 
         if is_toggle:
@@ -412,6 +485,18 @@ class VariableEngine:
         new_tags: list,
     ):
         """为 Indicator 推断 TagSpec、BindingSpec。"""
+
+        # V4.2: 先检查已有绑定，避免生成重复自动变量
+        existing_tag = self._find_existing_binding(item)
+        if existing_tag:
+            item.tag_binding = existing_tag
+            if existing_tag not in existing_tags:
+                ts = self._make_tag_spec(existing_tag, "Bool", oid, existing_tags, new_tags)
+                if ts:
+                    new_tags.append(ts)
+                    existing_tags[existing_tag] = ts
+            return
+
         is_alarm = self._detect_alarm_from_item(item, oid)
 
         if is_alarm:
@@ -480,6 +565,18 @@ class VariableEngine:
         new_tags: list,
     ):
         """为 IOField 推断 TagSpec。"""
+
+        # V4.2: 先检查已有绑定，避免生成重复自动变量
+        existing_tag = self._find_existing_binding(item)
+        if existing_tag:
+            item.tag_binding = existing_tag
+            if existing_tag not in existing_tags:
+                ts = self._make_tag_spec(existing_tag, "Real", oid, existing_tags, new_tags)
+                if ts:
+                    new_tags.append(ts)
+                    existing_tags[existing_tag] = ts
+            return
+
         tag_name = self._make_tag_name(oid, IOFIELD_PREFIX, existing_tags)
 
         existing_pt = (item.tag_binding or "").strip()
@@ -529,6 +626,18 @@ class VariableEngine:
 
         如果未创建文本列表，标记降级警告。
         """
+
+        # V4.2: 先检查已有绑定，避免生成重复自动变量
+        existing_tag = self._find_existing_binding(item)
+        if existing_tag:
+            item.tag_binding = existing_tag
+            if existing_tag not in existing_tags:
+                ts = self._make_tag_spec(existing_tag, "Int", oid, existing_tags, new_tags)
+                if ts:
+                    new_tags.append(ts)
+                    existing_tags[existing_tag] = ts
+            return
+
         tag_name = self._make_tag_name(oid, SYMBOLIC_IOFIELD_PREFIX, existing_tags)
 
         existing_pt = (item.tag_binding or "").strip()
@@ -607,15 +716,12 @@ class VariableEngine:
 
         # 预处理映射表 — 将 "VariableName" → "DB10.DBX0.0"
         mapping_stripped: Dict[str, str] = {}
-        _KNOWN_PREFIXES = ("BTN_", "STS_", "LMP_", "MEM_", "IO_", "SIO_")
         for key, addr in plc_tag_mapping.items():
             mapping_stripped[key] = addr
-            for pfx in _KNOWN_PREFIXES:
-                if key.startswith(pfx) and len(key) > len(pfx):
-                    stripped = key[len(pfx):]
-                    if stripped not in mapping_stripped:
-                        mapping_stripped[stripped] = addr
-                    break
+            from backend.utils.tag_prefix_utils import strip_known_tag_prefixes
+            stripped = strip_known_tag_prefixes(key)
+            if stripped != key and stripped not in mapping_stripped:
+                mapping_stripped[stripped] = addr
 
         for tag in project.tags:
             tag_name = tag.name
@@ -627,12 +733,10 @@ class VariableEngine:
 
             # Level 2: 去掉前缀后匹配
             if address is None:
-                for pfx in _KNOWN_PREFIXES:
-                    if tag_name.startswith(pfx) and len(tag_name) > len(pfx):
-                        stripped = tag_name[len(pfx):]
-                        if stripped in plc_tag_mapping:
-                            address = plc_tag_mapping[stripped]
-                            break
+                from backend.utils.tag_prefix_utils import strip_known_tag_prefixes
+                stripped = strip_known_tag_prefixes(tag_name)
+                if stripped != tag_name and stripped in plc_tag_mapping:
+                    address = plc_tag_mapping[stripped]
 
             # Level 3: 按 item id 匹配（tag 名与某个 item id 相同）
             if address is None and tag_name in item_by_id:
@@ -888,16 +992,10 @@ class VariableEngine:
         existing_tags: dict,
     ) -> str:
         """生成变量名（自动规范化非法字符）。"""
-        all_prefixes = {
-            "BTN_", "MEM_", "STS_", "LMP_", "IO_", "SIO_", "TXT_",
-        }
         # 先规范化 oid 中的非法字符
         sanitized_oid = self.normalize_tag_name(oid)
-        base_name = sanitized_oid
-        for p in sorted(all_prefixes, key=len, reverse=True):
-            if sanitized_oid.startswith(p) and len(sanitized_oid) > len(p):
-                base_name = sanitized_oid[len(p):]
-                break
+        from backend.utils.tag_prefix_utils import strip_known_tag_prefixes
+        base_name = strip_known_tag_prefixes(sanitized_oid)
 
         candidate = self.normalize_tag_name(f"{prefix}{base_name}")
         if candidate in existing_tags:
@@ -966,6 +1064,34 @@ class VariableEngine:
             decimals = obj.get("decimal_digits", 0)
             return "Real" if decimals > 0 else "Int"
         return "Real"
+
+    # ------------------------------------------------------------------
+    # V4.1 Tag integrity validation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def validate_project_tag_integrity(project: HmiProjectSpec) -> list[Diagnostic]:
+        """校验 HmiProjectSpec 的 tag 完整性。
+
+        检查:
+          - item.binding.tag 为空
+          - binding.tag 不在 project.tags
+          - 同名变量类型冲突
+          - 同名变量地址冲突
+        """
+        from .validation.tag_binding_gate import validate_project_tag_bindings
+        return validate_project_tag_bindings(project)
+
+    @staticmethod
+    def raise_if_project_tag_integrity_invalid(project: HmiProjectSpec) -> None:
+        """如果 project tag 完整性问题存在阻断错误，抛出 ValueError。"""
+        errors = VariableEngine.validate_project_tag_integrity(project)
+        blocking = [e for e in errors if e.severity == DiagnosticSeverity.ERROR]
+        if blocking:
+            msg_lines = [f"Invalid project tag integrity ({len(blocking)} error(s)):"]
+            for e in blocking:
+                msg_lines.append(f"  - [{e.code}] {e.message}")
+            raise ValueError("\n".join(msg_lines))
 
     # ------------------------------------------------------------------
     # 静态便捷方法

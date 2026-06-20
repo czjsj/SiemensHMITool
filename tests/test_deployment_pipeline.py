@@ -87,7 +87,9 @@ class TestBackendFactory:
 
     def test_auto_falls_back_to_comfort(self):
         be, name = BackendFactory.create(TargetSpec(family=HmiFamily.AUTO))
-        assert isinstance(be, ComfortBackend)
+        # V4.2: AUTO 无连接时返回 (None, "unknown") 以阻断部署
+        assert be is None
+        assert name == "unknown"
 
 
 # ── Part 3: execute() 边界 ──────────────────────────────────────────────

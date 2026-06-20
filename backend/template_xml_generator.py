@@ -116,6 +116,13 @@ def generate_from_template_xml(
     options = options or {}
     warnings: list[str] = []
 
+    # V4.1: normalize tag bindings before XML generation
+    from backend.tag_binding_normalizer import normalize_legacy_tag_bindings
+    try:
+        ir = normalize_legacy_tag_bindings(ir)
+    except ValueError as e:
+        return template_xml, [f"Tag binding normalization failed: {e}"]
+
     # 注册命名空间，防止 ET 在输出时使用 ns0: 前缀
     ns_map = _detect_namespace(template_xml)
     for prefix, uri in ns_map.items():
@@ -1049,6 +1056,8 @@ def generate_from_template_v4(
     from backend.template.xml_utils import collect_existing_ids, deepcopy_xml_node
     from backend.template.template_binding_validator import validate_generated_screen_xml
     from backend.variable_engine import VariableEngine
+    from backend.tag_binding_normalizer import normalize_legacy_tag_bindings
+    from backend.validation.tag_binding_gate import raise_if_project_tag_bindings_invalid
 
     options = options or {}
     warnings: list[str] = []
@@ -1058,9 +1067,23 @@ def generate_from_template_v4(
         "pre_import_validated": {},
     }
 
+    # V4.1: Step 0 — normalize before enrich
+    ir = normalize_legacy_tag_bindings(ir)
+
     # ---- Step 1: VariableEngine enrich ----
     engine = VariableEngine()
     project = engine.enrich(ir)
+
+    # V4.1: Step 1.5 — validate tag binding integrity
+    try:
+        raise_if_project_tag_bindings_invalid(project)
+    except ValueError as e:
+        return {
+            "ok": False,
+            "xml": None, "xml_path": None,
+            "warnings": [f"Tag binding validation failed: {e}"],
+            "diagnostics": diagnostics,
+        }
 
     # ---- Step 2: Template analysis ----
     try:

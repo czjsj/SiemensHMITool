@@ -36,6 +36,14 @@ from backend.domain.deployment_result import (
     CompileResult,
     ObjectCountSummary,
 )
+from backend.tag_binding_normalizer import (
+    normalize_legacy_tag_bindings,
+    assert_legacy_tags_complete,
+)
+from backend.validation.tag_binding_gate import (
+    validate_project_tag_bindings,
+    raise_if_project_tag_bindings_invalid,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -144,8 +152,12 @@ class BackendFactory:
 
         else:
             # 未知 family → 返回错误
-            from backend.backends.classic.comfort_backend import ComfortBackend
-            return ComfortBackend(), "comfort_classic"
+            from backend.domain.diagnostics import Diagnostic
+            logger.warning(
+                "BackendFactory.create: 未知 target.family=%s, 返回 None",
+                target.family,
+            )
+            return None, "unknown"
 
     @staticmethod
     def _resolve_auto(target: TargetSpec):
@@ -153,31 +165,20 @@ class BackendFactory:
 
         无法确定时返回 TARGET_FAMILY_AMBIGUOUS 诊断。
         """
-        from backend.backends.classic.comfort_backend import ComfortBackend
         from backend.domain.diagnostics import Diagnostic
 
         try:
             from backend.openness.device_discovery import DeviceDiscovery
             discovery = DeviceDiscovery({})
-            # 尝试从全局 OpennessManager 获取已连接的项目
-            detected_family = "Unknown"
-            # 注: 实际运行时由 DeploymentService 传入已探测的 family
-            # 此处为无连接环境下的安全回退
-
-            if detected_family == "Basic":
-                from backend.backends.classic.basic_backend import BasicBackend
-                return BasicBackend(), "basic_classic"
-            elif detected_family == "Unified":
-                from backend.backends.unified.unified_backend import UnifiedBackend
-                return UnifiedBackend(), "unified_direct"
-            elif detected_family == "Comfort":
-                return ComfortBackend(), "comfort_classic"
-            else:
-                # 无法确定 → 返回 Comfort + 诊断标记
-                be = ComfortBackend()
-                return be, "comfort_classic"
+            # _resolve_auto 被 deploy_legacy_ir 调用，此处没有 hmi_software 对象
+            # 返回 None + 诊断，让调用方决定阻断
+            logger.warning(
+                "BackendFactory._resolve_auto: 无 hmi_software 对象，"
+                "无法自动解析 AUTO family"
+            )
+            return None, "unknown"
         except Exception:
-            return ComfortBackend(), "comfort_classic"
+            return None, "unknown"
 
     @staticmethod
     def create_with_discovery(
@@ -229,24 +230,103 @@ class BackendFactory:
                 from backend.backends.unified.unified_backend import UnifiedBackend
                 return UnifiedBackend(), "unified_direct", diags
             else:
+                # Unknown → 阻断，不返回 ComfortBackend 回退
+                from backend.openness.diagnostics_utils import describe_dotnet_object
+                sw_info = describe_dotnet_object(hmi_software) or {}
                 diags.append(Diagnostic(
-                    code=DiagnosticCodes.TARGET_FAMILY_AMBIGUOUS,
+                    code=DiagnosticCodes.HMI_FAMILY_UNKNOWN,
                     severity=DiagnosticSeverity.ERROR,
                     phase="P00_DISCOVERY",
-                    message=f"DeviceDiscovery 返回未知 family: '{family_str}'",
-                    remediation="请显式指定 target.family",
+                    message=(
+                        f"DeviceDiscovery 返回 unknown family: '{family_str}'. "
+                        f"HMI 软件类型: {sw_info.get('dotnet_full_name', 'N/A')}. "
+                        f"无法确定部署后端，阻断部署。"
+                    ),
+                    details={
+                        "family_str": family_str,
+                        "hmi_software_type": sw_info,
+                    },
+                    remediation=(
+                        "请显式指定 target.family 为 basic/comfort/unified，"
+                        "或确认 TIA Portal 中 HMI 设备类型受支持。"
+                    ),
                 ))
-                from backend.backends.classic.comfort_backend import ComfortBackend
-                return ComfortBackend(), "comfort_classic", diags
+                return None, "unknown", diags
         except Exception as e:
+            from backend.openness.diagnostics_utils import describe_dotnet_object
+            sw_info = describe_dotnet_object(hmi_software) or {}
             diags.append(Diagnostic(
-                code=DiagnosticCodes.TARGET_FAMILY_AMBIGUOUS,
+                code=DiagnosticCodes.HMI_FAMILY_UNKNOWN,
                 severity=DiagnosticSeverity.ERROR,
                 phase="P00_DISCOVERY",
                 message=f"DeviceDiscovery 异常: {e}",
+                details={"hmi_software_type": sw_info},
+                remediation="请显式指定 target.family",
             ))
-            from backend.backends.classic.comfort_backend import ComfortBackend
-            return ComfortBackend(), "comfort_classic", diags
+            return None, "unknown", diags
+
+
+# ---------------------------------------------------------------------------
+# V4.1: 部署顺序验证
+# ---------------------------------------------------------------------------
+
+
+def is_import_tags_step(step: DeploymentStep) -> bool:
+    """判断是否为变量导入步骤。"""
+    phase = (step.phase or "").upper()
+    operation = (step.operation or "").upper()
+    target = (step.target_type or "").lower()
+    return (
+        "P30" in phase
+        or "TAG_TABLE" in phase
+        or "IMPORT_TAG" in operation
+        or "CREATE_TAG" in operation
+        or target in ("tag", "tag_table")
+    )
+
+
+def is_import_screen_step(step: DeploymentStep) -> bool:
+    """判断是否为画面导入步骤。"""
+    phase = (step.phase or "").upper()
+    operation = (step.operation or "").upper()
+    target = (step.target_type or "").lower()
+    return (
+        "P50" in phase
+        or "SCREEN" in phase
+        or "IMPORT_SCREEN" in operation
+        or "CREATE_SCREEN" in operation
+        or target == "screen"
+    )
+
+
+def assert_tag_import_before_screen_import(plan: DeploymentPlan):
+    """断言变量导入阶段在画面导入阶段之前。
+
+    检查 plan.steps 中:
+      - 如果有画面导入步骤，必须也有变量导入步骤。
+      - 所有变量导入步骤的索引必须小于所有画面导入步骤的索引。
+
+    Raises:
+        ValueError: 如果 tag 和 screen 步骤缺失或顺序错误。
+    """
+    tag_steps = [(i, s) for i, s in enumerate(plan.steps) if is_import_tags_step(s)]
+    screen_steps = [(i, s) for i, s in enumerate(plan.steps) if is_import_screen_step(s)]
+
+    if screen_steps and not tag_steps:
+        raise ValueError(
+            "Deployment plan imports screens but has no tag import step. "
+            "P30 (tag import) must exist before P50 (screen import)."
+        )
+
+    if tag_steps and screen_steps:
+        first_tag_idx = min(i for i, _ in tag_steps)
+        first_screen_idx = min(i for i, _ in screen_steps)
+        if first_tag_idx > first_screen_idx:
+            raise ValueError(
+                f"Tag import step (index {first_tag_idx}) must run before "
+                f"screen import step (index {first_screen_idx}). "
+                f"P30 must precede P50 in deployment plan."
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -279,12 +359,20 @@ class DeploymentService:
     def validate(
         self, project: HmiProjectSpec,
     ) -> dict[str, Any]:
-        """校验 HmiProjectSpec。"""
-        from backend.domain.validation import validate_ir_v2
+        """校验 HmiProjectSpec — V4.1 包含 tag binding 完整性。"""
+        from backend.domain.validation import validate_ir_v2, validate_template_binding_requirements
         from backend.capabilities.capability_service import CapabilityService
 
         diags: list[Diagnostic] = []
         diags.extend(validate_ir_v2(project))
+        diags.extend(validate_template_binding_requirements(project))
+
+        # V4.1: tag binding gate
+        try:
+            tag_diags = validate_project_tag_bindings(project)
+            diags.extend(tag_diags)
+        except Exception:
+            pass
 
         cap_svc = CapabilityService()
         caps = cap_svc.resolve(project.target)
@@ -377,6 +465,17 @@ class DeploymentService:
         else:
             backend, backend_name = BackendFactory.create(project.target)
 
+        if backend is None:
+            result["ok"] = False
+            result["status"] = DeploymentStatus.BLOCKED.value
+            result["error"] = f"无法确定部署后端 (family={project.target.family.value})，请显式指定。"
+            result["diagnostics"].append({
+                "severity": "error",
+                "code": "HMI_FAMILY_UNKNOWN",
+                "message": result["error"],
+            })
+            return result
+
         result["backend"] = backend_name
 
         # ---- Step 3: Build plan ----
@@ -393,6 +492,20 @@ class DeploymentService:
             result["ok"] = False
             result["status"] = DeploymentStatus.BLOCKED.value
             result["error"] = f"部署计划包含 {len(plan_errors)} 个错误"
+            return result
+
+        # V4.1: 断言 tag import 在 screen import 之前
+        try:
+            assert_tag_import_before_screen_import(plan)
+        except ValueError as e:
+            result["ok"] = False
+            result["status"] = DeploymentStatus.BLOCKED.value
+            result["error"] = str(e)
+            result["diagnostics"].append({
+                "severity": "error",
+                "code": "TAG_SCREEN_ORDER_VIOLATION",
+                "message": str(e),
+            })
             return result
 
         # ---- Step 4: DRY_RUN ----
@@ -499,6 +612,171 @@ class DeploymentService:
         self._save_artifacts(result, step_results, compile_dict, plan_id, backend_name)
 
         return result
+
+    # ------------------------------------------------------------------
+    # V4.1: deploy_legacy_ir — 完整变量→画面部署流水线
+    # ------------------------------------------------------------------
+
+    def deploy_legacy_ir(
+        self, legacy_ir: dict, dry_run: bool = False, **kwargs,
+    ) -> dict[str, Any]:
+        """从 legacy IR 执行完整部署流水线。
+
+        流程:
+          1. normalize_legacy_tag_bindings(legacy_ir)
+          2. validate_ir(legacy_ir)
+          3. normalize_legacy_tag_bindings(validated_ir)
+          4. VariableEngine.enrich(validated_ir, target_hint, plc_tag_mapping)
+          5. validate_ir_v2(project)
+          6. validate_template_binding_requirements(project)
+          7. raise_if_project_tag_bindings_invalid(project)
+          8. BackendFactory.create(...)
+          9. backend.build_plan(project, dry_run=dry_run)
+          10. assert_tag_import_before_screen_import(plan)
+          11. backend.execute(plan, project)
+          12. VerificationService.verify_full(...)
+          13. 返回 DeploymentResult + generation summary
+
+        任何阻断错误都会立即返回 BLOCKED/FAILED 状态。
+        """
+        from backend.domain.validation import validate_ir_v2, validate_template_binding_requirements
+        from backend.variable_engine import VariableEngine
+        from backend.domain.diagnostics import Diagnostic
+
+        result: dict[str, Any] = {
+            "ok": False,
+            "status": DeploymentStatus.NOT_CONNECTED.value,
+            "plan_id": "",
+            "backend": "",
+            "diagnostics": [],
+            "summary": {},
+            "tag_summary": {},
+        }
+
+        # Step 1: normalize
+        try:
+            ir = normalize_legacy_tag_bindings(legacy_ir)
+        except ValueError as e:
+            result["status"] = DeploymentStatus.BLOCKED.value
+            result["error"] = f"Tag binding normalization failed: {e}"
+            result["diagnostics"].append({
+                "severity": "error",
+                "code": "NORMALIZE_FAILED",
+                "message": str(e),
+            })
+            return result
+
+        # Step 2: validate_ir (legacy)
+        try:
+            from backend.hmi_ir import validate_ir as validate_legacy_ir
+            ir = validate_legacy_ir(ir)
+        except Exception as e:
+            result["status"] = DeploymentStatus.BLOCKED.value
+            result["error"] = f"Legacy IR validation failed: {e}"
+            result["diagnostics"].append({
+                "severity": "error",
+                "code": "IR_VALIDATION_FAILED",
+                "message": str(e),
+            })
+            return result
+
+        # Step 3: re-normalize after validation
+        try:
+            ir = normalize_legacy_tag_bindings(ir)
+        except ValueError as e:
+            result["status"] = DeploymentStatus.BLOCKED.value
+            result["error"] = f"Post-validation tag normalization failed: {e}"
+            return result
+
+        # Step 4: VariableEngine.enrich
+        target_hint = kwargs.get("target_hint")
+        plc_tag_mapping = kwargs.get("plc_tag_mapping")
+        try:
+            engine = VariableEngine()
+            project = engine.enrich(ir, target_hint=target_hint, plc_tag_mapping=plc_tag_mapping)
+        except Exception as e:
+            result["status"] = DeploymentStatus.BLOCKED.value
+            result["error"] = f"VariableEngine.enrich failed: {e}"
+            return result
+
+        # Step 5-6: validate_ir_v2 + template binding requirements
+        v2_diags = list(validate_ir_v2(project))
+        tmpl_diags = list(validate_template_binding_requirements(project))
+        all_diags = v2_diags + tmpl_diags
+        result["diagnostics"].extend([d.model_dump() for d in all_diags])
+
+        blocking = [
+            d for d in all_diags
+            if d.severity == DiagnosticSeverity.ERROR
+        ]
+        if blocking:
+            result["ok"] = False
+            result["status"] = DeploymentStatus.BLOCKED.value
+            result["error"] = (
+                f"Deployment blocked: {len(blocking)} validation error(s). "
+                f"Tag/binding validation failed."
+            )
+            return result
+
+        # Step 7: raise_if_project_tag_bindings_invalid
+        try:
+            raise_if_project_tag_bindings_invalid(project)
+        except ValueError as e:
+            result["ok"] = False
+            result["status"] = DeploymentStatus.BLOCKED.value
+            result["error"] = str(e)
+            return result
+
+        # Step 8: BackendFactory
+        backend, backend_name = BackendFactory.create(project.target)
+        result["backend"] = backend_name
+        if backend is None:
+            result["ok"] = False
+            result["status"] = DeploymentStatus.BLOCKED.value
+            result["error"] = (
+                f"无法确定部署后端 (family={project.target.family.value})。"
+                f"请显式指定 target.family 为 basic/comfort/unified。"
+            )
+            result["diagnostics"].append({
+                "severity": "error",
+                "code": "HMI_FAMILY_UNKNOWN",
+                "message": result["error"],
+            })
+            return result
+
+        # Step 9: build_plan
+        plan, step_logs = self.plan(project, dry_run=dry_run)
+        result["plan_id"] = plan.plan_id
+        plan_diags = [d.model_dump() for d in plan.diagnostics]
+        result["diagnostics"].extend(plan_diags)
+
+        plan_errors = [d for d in plan.diagnostics if d.severity == DiagnosticSeverity.ERROR]
+        if plan_errors:
+            result["ok"] = False
+            result["status"] = DeploymentStatus.BLOCKED.value
+            result["error"] = f"Deployment plan contains {len(plan_errors)} error(s)"
+            return result
+
+        # Step 10: assert tag import before screen import
+        try:
+            assert_tag_import_before_screen_import(plan)
+        except ValueError as e:
+            result["ok"] = False
+            result["status"] = DeploymentStatus.BLOCKED.value
+            result["error"] = str(e)
+            return result
+
+        # If dry_run, report result early
+        if dry_run:
+            result["ok"] = True
+            result["status"] = DeploymentStatus.DRY_RUN.value
+            result["mode"] = "DRY_RUN"
+            result["message"] = "dry-run: plan validated, tag/screen order confirmed."
+            result["summary"] = self._summarize_plan(plan)
+            return result
+
+        # Step 11-13: delegate to deploy for real execution
+        return self.deploy(project, plan=plan)
 
     # ------------------------------------------------------------------
     # Artifact persistence

@@ -9,7 +9,7 @@ V3.2: 真实 TIA 部署通过 ClassicOpennessExecutor 执行。
 from __future__ import annotations
 import uuid
 from backend.backends.base import HmiBackend
-from backend.domain.ir_v2 import HmiProjectSpec, TargetSpec
+from backend.domain.ir_v2 import HmiProjectSpec, TargetSpec, ScreenItemSpec
 from backend.domain.deployment_plan import DeploymentPlan, DeploymentStep
 from backend.domain.deployment_result import (
     DeploymentResult, VerificationResult, CompileResult, ObjectCountSummary,
@@ -130,8 +130,38 @@ class ComfortBackend(HmiBackend):
                 scripts_xml += self.build_vbs_script(script) + "\n"
             for resource in getattr(spec, "resources", []):
                 resources_xml += self.compile_resources([resource])[0] + "\n"
+
+            # V4.1: Build binding_map and rewrite screen references for Comfort
+            binding_map = self._build_binding_map(spec)
             for screen in spec.screens:
-                screen_xml_list.append(self.compile_screen(screen))
+                raw_xml = self._common.build_screen_xml(screen)
+                # Rewrite references
+                rewritten_xml, rewrite_log, leak_report = self._common.rewrite_screen_references(
+                    raw_xml, binding_map,
+                )
+
+                # V4.1: Template leak check — block on leaks
+                if leak_report:
+                    return DeploymentResult(
+                        success=False,
+                        status=DeploymentStatus.FAILED,
+                        plan_id=plan.plan_id,
+                        backend="comfort_classic",
+                        diagnostics=[Diagnostic(
+                            code=DiagnosticCodes.CLASSIC_TEMPLATE_TAG_REFERENCE_LEAK,
+                            severity=DiagnosticSeverity.ERROR,
+                            phase="P50_SCREENS",
+                            object_type="screen",
+                            object_name=screen.name,
+                            message=f"模板变量引用泄漏: {leak_report}",
+                        )],
+                        details={
+                            "failed_step": "template_leak_check",
+                            "leak_report": leak_report,
+                        },
+                    )
+
+                screen_xml_list.append(rewritten_xml)
 
         # 执行真实 TIA 调用
         from backend.openness.classic_executor import ClassicOpennessExecutor
@@ -261,6 +291,48 @@ class ComfortBackend(HmiBackend):
             template_tag_names=self._common.TEMPLATE_TAG_NAMES,
             binding_map=binding_map,
         )
+
+    # ------------------------------------------------------------------
+    # V4.1: 构建 binding_map 用于画面引用重写
+    # ------------------------------------------------------------------
+
+    def _build_binding_map(self, spec: HmiProjectSpec) -> dict[str, dict]:
+        """从 HmiProjectSpec 构建 {control_id → binding_info} 映射。"""
+        binding_map: dict[str, dict] = {}
+        for screen in spec.screens:
+            for item in screen.items:
+                tag_name = item.tag_binding or ""
+                if not tag_name or tag_name in self._common.TEMPLATE_TAG_NAMES:
+                    # 尝试从 spec.tags 找到匹配项
+                    tag_name = self._resolve_tag_name(item, spec)
+
+                if not tag_name:
+                    continue
+
+                binding_map[item.id] = {
+                    "tag_name": tag_name,
+                    "control_type": item.type.value if hasattr(item.type, "value") else str(item.type),
+                    "is_momentary": item.properties.get("tag_mode", "momentary") != "toggle",
+                    "text_list": item.properties.get("text_list"),
+                }
+        return binding_map
+
+    @staticmethod
+    def _resolve_tag_name(item: ScreenItemSpec, spec: HmiProjectSpec) -> str:
+        """为没有明确 tag_binding 的 item 解析变量名。"""
+        tag_names = {t.name for t in spec.tags}
+        if item.id in tag_names:
+            return item.id
+        # 去掉前缀匹配
+        from backend.utils.tag_prefix_utils import strip_known_tag_prefixes
+        base = strip_known_tag_prefixes(item.id)
+        if base in tag_names:
+            return base
+        # 按类型前缀搜索
+        for tag in spec.tags:
+            if item.id in tag.name or tag.name in item.id:
+                return tag.name
+        return item.tag_binding or ""
 
     # ---- XML 产物生成器（DESCRIPTION_ONLY，不调用 Siemens Openness） ----
 

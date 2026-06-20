@@ -213,3 +213,226 @@ class TestFindScreenByName:
 
         result = mgr._list_available_screens(FakeSoftware())
         assert result == []
+
+
+class TestSyncTagsFamilyRouting:
+    """V4.2: 测试 sync_tags 家族感知路由 — 不再硬编码 sw.TagTables。"""
+
+    def _make_manager_with_mocks(self, monkeypatch, sw_fake, hmi_family):
+        """构造 OpennessManager，mock _find_hmi_software 和 get_hmi_capabilities。"""
+        mgr = make_manager()
+
+        def fake_find(*args, **kwargs):
+            return sw_fake
+        monkeypatch.setattr(mgr, "_find_hmi_software", fake_find)
+
+        def fake_caps(*args, **kwargs):
+            return {
+                "connected": True,
+                "hmi_family": hmi_family,
+                "is_unified": hmi_family == "Unified",
+                "is_classic": hmi_family in ("Basic", "Comfort", "Classic"),
+            }
+        monkeypatch.setattr(mgr, "get_hmi_capabilities", fake_caps)
+
+        # 确保 _project 不为 None
+        mgr._project = True
+        return mgr
+
+    def test_sync_tags_no_attribute_error_on_hmi_target(self, monkeypatch):
+        """Fake HmiTarget 无 TagTables → sync_tags 不应抛 AttributeError，应返回结构化错误。"""
+        class FakeHmiTarget:
+            """模拟 HmiTarget wrapper 对象 — 没有 TagTables 属性。"""
+            pass
+
+        sw = FakeHmiTarget()
+        mgr = self._make_manager_with_mocks(monkeypatch, sw, "Classic")
+
+        # 不应抛 AttributeError
+        result = mgr.sync_tags([{"name": "BTN_Start", "data_type": "Bool"}])
+        assert not result.get("ok"), f"Expected blocked, got: {result}"
+        assert len(result["errors"]) > 0, f"Expected errors, got: {result}"
+        # 错误信息应包含 .NET 类型和已尝试路径
+        error_text = " ".join(result["errors"])
+        assert "FakeHmiTarget" in error_text or "变量容器" in error_text or "解析" in error_text, \
+            f"Error should contain diagnostic info, got: {error_text}"
+
+    def test_sync_tags_classic_routes_to_safe_import(self, monkeypatch):
+        """Classic 家族 → 应通过 ClassicOpennessExecutor.import_hmi_tags_safe 导入。"""
+        # 使用简单对象避免嵌套类作用域问题
+        class FakeTagsColl:
+            def __iter__(self):
+                return iter([])
+
+        class FakeDefaultTable:
+            pass
+
+        FakeDefaultTable.Tags = FakeTagsColl()
+
+        class FakeTagFolder:
+            pass
+
+        FakeTagFolder.DefaultTagTable = FakeDefaultTable()
+
+        class FakeClassicSw:
+            pass
+
+        sw = FakeClassicSw()
+        sw.TagFolder = FakeTagFolder()
+        mgr = self._make_manager_with_mocks(monkeypatch, sw, "Comfort")
+
+        # Mock ClassicOpennessExecutor 的 import_hmi_tags_safe
+        called_with = {}
+
+        class FakeStepResult:
+            success = True
+            diagnostics = []
+            api_calls = ["strategy_used=ImportOptions.Override"]
+
+        def fake_import_hmi_tags_safe(self_exec, hmi_sw, tags_xml, tag_items=None):
+            called_with["called"] = True
+            called_with["hmi_sw"] = hmi_sw
+            called_with["tags_xml"] = tags_xml
+            called_with["tag_items"] = tag_items
+            return FakeStepResult()
+
+        from backend.openness.classic_executor import ClassicOpennessExecutor
+        monkeypatch.setattr(
+            ClassicOpennessExecutor,
+            "import_hmi_tags_safe",
+            fake_import_hmi_tags_safe,
+        )
+        result = mgr.sync_tags([{"name": "CMD_Start", "data_type": "Bool"}])
+
+        assert called_with.get("called"), \
+            f"Expected ClassicOpennessExecutor.import_hmi_tags_safe to be called"
+        assert result.get("ok"), f"Expected success, got: {result}"
+        assert "CMD_Start" in result.get("created", []), \
+            f"Expected CMD_Start in created, got: {result}"
+
+    def test_sync_tags_unified_routes_to_create_tags(self, monkeypatch):
+        """Unified 家族 → 应通过 UnifiedOpennessExecutor.create_tags 创建变量。"""
+        class FakeUnifiedSw:
+            """模拟 Unified HMI 软件对象 — 只有 Tags 直接集合。"""
+            class FakeTagsColl:
+                def __iter__(self):
+                    return iter([])
+            Tags = FakeTagsColl()
+
+        sw = FakeUnifiedSw()
+        mgr = self._make_manager_with_mocks(monkeypatch, sw, "Unified")
+
+        called_with = {}
+
+        class FakeStepResult:
+            success = True
+            diagnostics = []
+
+        def fake_create_tags(self_exec, hmi_sw, tag_specs):
+            called_with["called"] = True
+            called_with["hmi_sw"] = hmi_sw
+            called_with["tag_specs"] = tag_specs
+            return FakeStepResult()
+
+        from backend.openness.unified_executor import UnifiedOpennessExecutor
+        monkeypatch.setattr(
+            UnifiedOpennessExecutor,
+            "create_tags",
+            fake_create_tags,
+        )
+
+        result = mgr.sync_tags([{"name": "UNI_Tag", "data_type": "Real"}])
+        assert called_with.get("called"), \
+            f"Expected UnifiedOpennessExecutor.create_tags to be called"
+        assert result.get("ok"), f"Expected success, got: {result}"
+        assert "UNI_Tag" in result.get("created", []), \
+            f"Expected UNI_Tag in created, got: {result}"
+
+    def test_sync_tags_unknown_family_returns_diagnostic(self, monkeypatch):
+        """未知 HMI 家族 → 返回结构化诊断，包含 .NET 类型和探测的属性。"""
+        class FakeUnknownSw:
+            """模拟未知 HMI 对象 — 无 TagFolder、无 Tags。"""
+            pass
+
+        sw = FakeUnknownSw()
+        mgr = self._make_manager_with_mocks(monkeypatch, sw, "Unknown")
+
+        result = mgr.sync_tags([{"name": "TEST_Tag", "data_type": "Bool"}])
+        assert not result.get("ok"), f"Expected blocked for unknown family, got: {result}"
+        assert len(result["errors"]) > 0, f"Expected diagnostic errors, got: {result}"
+        error_text = " ".join(result["errors"])
+        # 应包含类型名、family、已尝试路径、可用属性
+        assert "FakeUnknownSw" in error_text or "Unknown" in error_text or "变量容器" in error_text, \
+            f"Error should contain diagnostic info about the unknown object, got: {error_text}"
+
+    def test_sync_tags_preserves_output_format(self, monkeypatch):
+        """sync_tags 返回格式始终包含 ok/created/skipped/errors 键。"""
+        class FakeSw:
+            class FakeTagsColl:
+                def __iter__(self):
+                    return iter([])
+            Tags = FakeTagsColl()
+
+        sw = FakeSw()
+        mgr = self._make_manager_with_mocks(monkeypatch, sw, "Unified")
+
+        # Mock create_tags 成功
+        class FakeStepResult:
+            success = True
+            diagnostics = []
+
+        from backend.openness.unified_executor import UnifiedOpennessExecutor
+        monkeypatch.setattr(
+            UnifiedOpennessExecutor,
+            "create_tags",
+            lambda self_exec, hmi_sw, tag_specs: FakeStepResult(),
+        )
+
+        result = mgr.sync_tags([
+            {"name": "Tag_A", "data_type": "Bool"},
+            {"name": "Tag_B", "data_type": "Int"},
+        ])
+
+        # 验证输出格式
+        assert "ok" in result
+        assert "created" in result
+        assert "skipped" in result
+        assert "errors" in result
+        assert isinstance(result["created"], list)
+        assert isinstance(result["skipped"], list)
+        assert isinstance(result["errors"], list)
+
+    def test_sync_tags_skips_existing_tags(self, monkeypatch):
+        """已存在的变量应放入 skipped 列表，不重复创建。"""
+        class FakeSw:
+            class FakeTag:
+                Name = "EXIST_Tag"
+
+            class FakeTagsColl:
+                def __iter__(self):
+                    return iter([FakeSw.FakeTag()])
+            Tags = FakeTagsColl()
+
+        sw = FakeSw()
+        mgr = self._make_manager_with_mocks(monkeypatch, sw, "Unified")
+
+        class FakeStepResult:
+            success = True
+            diagnostics = []
+
+        from backend.openness.unified_executor import UnifiedOpennessExecutor
+        monkeypatch.setattr(
+            UnifiedOpennessExecutor,
+            "create_tags",
+            lambda self_exec, hmi_sw, tag_specs: FakeStepResult(),
+        )
+
+        result = mgr.sync_tags([
+            {"name": "EXIST_Tag", "data_type": "Bool"},
+            {"name": "NEW_Tag", "data_type": "Bool"},
+        ])
+
+        assert "EXIST_Tag" in result["skipped"], \
+            f"EXIST_Tag should be skipped, got: {result}"
+        assert "NEW_Tag" in result["created"], \
+            f"NEW_Tag should be created, got: {result}"

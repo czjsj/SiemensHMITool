@@ -369,7 +369,8 @@ def validate_ir(ir: dict) -> dict:
             base["mode"] = mode if mode in VALID_MODES else "Output"
             # 自动生成 process_tag（若缺失则按前缀规则默认）
             prefix = TAG_PREFIX_MAP.get(otype, "IO_")
-            tag = o.get("process_tag") or f"{prefix}{oid}"
+            from backend.utils.tag_prefix_utils import ensure_tag_prefix
+            tag = o.get("process_tag") or ensure_tag_prefix(oid, prefix)
             if tag not in tag_names:
                 # 自动补全到 tags 列表
                 dtype = o.get("data_type", "Real")
@@ -408,7 +409,8 @@ def validate_ir(ir: dict) -> dict:
                 tag_mode = "momentary"
             base["tag_mode"] = tag_mode
             btn_prefix = "MEM_" if tag_mode == "toggle" else "BTN_"
-            btn_tag = o.get("process_tag") or f"{btn_prefix}{oid}"
+            from backend.utils.tag_prefix_utils import ensure_tag_prefix
+            btn_tag = o.get("process_tag") or ensure_tag_prefix(oid, btn_prefix)
             if btn_tag not in tag_names:
                 ir.setdefault("tags", []).append({
                     "name": btn_tag, "data_type": "Bool",
@@ -435,7 +437,8 @@ def validate_ir(ir: dict) -> dict:
                 (o.get("color_on") or "").startswith("#e2")
             )
             ind_prefix = "LMP_" if is_alarm_like else "STS_"
-            ind_tag = o.get("process_tag") or f"{ind_prefix}{oid}"
+            from backend.utils.tag_prefix_utils import ensure_tag_prefix
+            ind_tag = o.get("process_tag") or ensure_tag_prefix(oid, ind_prefix)
             if ind_tag not in tag_names:
                 ir.setdefault("tags", []).append({
                     "name": ind_tag, "data_type": "Bool",

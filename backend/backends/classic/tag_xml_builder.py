@@ -50,50 +50,43 @@ class TagXmlBuilder:
             </SW.Blocks>
           </Document>
         """
-        sid = str(uuid.uuid4()).replace("-", "")[:8]
+        doc_id = str(uuid.uuid4()).replace("-", "")[:8]
+        blocks_id = str(uuid.uuid4()).replace("-", "")[:8]
         tag_id = str(uuid.uuid4()).replace("-", "")[:8]
         table_name = tag.table or "DefaultTagTable"
 
         lines = [
             '<?xml version="1.0" encoding="utf-8"?>',
-            f'<Document xmlns="{self._ns}">',
+            f'<Document ID="{doc_id}" xmlns="{self._ns}">',
             '  <Engineering version="V16"/>',
-            '  <SW.Blocks>',
-            f'    <SW.TagTable ID="{sid}">',
+            f'  <SW.Blocks ID="{blocks_id}">',
+            f'    <SW.Tag ID="{tag_id}">',
             '      <AttributeList>',
-            f'        <Name>{xml_escape(table_name)}</Name>',
-            '      </AttributeList>',
-            '      <ObjectList>',
-            f'        <SW.Tag ID="{tag_id}">',
-            '          <AttributeList>',
-            f'            <Name>{xml_escape(tag.name)}</Name>',
-            f'            <DataType>{xml_escape(tag.data_type)}</DataType>',
+            f'        <Name>{xml_escape(tag.name)}</Name>',
+            f'        <DataType>{xml_escape(tag.data_type)}</DataType>',
         ]
 
         if tag.scope == TagScope.EXTERNAL:
             if tag.connection:
-                lines.append(f'            <Connection>{xml_escape(tag.connection)}</Connection>')
+                lines.append(f'        <Connection>{xml_escape(tag.connection)}</Connection>')
             if tag.address:
-                lines.append(f'            <Address>{xml_escape(tag.address)}</Address>')
+                lines.append(f'        <Address>{xml_escape(tag.address)}</Address>')
             if tag.controller_tag:
-                lines.append(f'            <ControllerTag>{xml_escape(tag.controller_tag)}</ControllerTag>')
+                lines.append(f'        <ControllerTag>{xml_escape(tag.controller_tag)}</ControllerTag>')
             if tag.acquisition_cycle:
-                lines.append(f'            <AcquisitionCycle>{xml_escape(tag.acquisition_cycle)}</AcquisitionCycle>')
+                lines.append(f'        <AcquisitionCycle>{xml_escape(tag.acquisition_cycle)}</AcquisitionCycle>')
         else:
-            # internal tag — 无连接信息
-            lines.append('            <Connection></Connection>')
+            lines.append('        <Connection></Connection>')
 
         lines.extend([
-            '          </AttributeList>',
+            '      </AttributeList>',
         ])
 
         if tag.initial_value is not None:
-            lines.append(f'          <StartValue>{xml_escape(str(tag.initial_value))}</StartValue>')
+            lines.append(f'      <StartValue>{xml_escape(str(tag.initial_value))}</StartValue>')
 
         lines.extend([
-            '        </SW.Tag>',
-            '      </ObjectList>',
-            '    </SW.TagTable>',
+            '    </SW.Tag>',
             '  </SW.Blocks>',
             '</Document>',
         ])
@@ -103,49 +96,44 @@ class TagXmlBuilder:
     def build_tags_batch_export_xml(
         self, tags: list[TagSpec], table_name: str = "DefaultTagTable",
     ) -> str:
-        """为多个变量生成批量导出 XML（同一变量表）。
+        """为多个变量生成批量导出 XML（直接 TagComposition.Import 格式）。
 
-        所有变量放在同一个 SW.TagTable 的 ObjectList 中。
+        TagComposition.Import 不接受 SW.TagTable 包裹，
+        变量直接放在 SW.Blocks 下作为 SW.Tag 元素。
         """
-        sid = str(uuid.uuid4()).replace("-", "")[:8]
+        doc_id = str(uuid.uuid4()).replace("-", "")[:8]
+        blocks_id = str(uuid.uuid4()).replace("-", "")[:8]
 
         lines = [
             '<?xml version="1.0" encoding="utf-8"?>',
-            f'<Document xmlns="{self._ns}">',
+            f'<Document ID="{doc_id}" xmlns="{self._ns}">',
             '  <Engineering version="V16"/>',
-            '  <SW.Blocks>',
-            f'    <SW.TagTable ID="{sid}">',
-            '      <AttributeList>',
-            f'        <Name>{xml_escape(table_name)}</Name>',
-            '      </AttributeList>',
-            '      <ObjectList>',
+            f'  <SW.Blocks ID="{blocks_id}">',
         ]
 
         for tag in tags:
             tag_id = str(uuid.uuid4()).replace("-", "")[:8]
-            lines.append(f'        <SW.Tag ID="{tag_id}">')
-            lines.append('          <AttributeList>')
-            lines.append(f'            <Name>{xml_escape(tag.name)}</Name>')
-            lines.append(f'            <DataType>{xml_escape(tag.data_type)}</DataType>')
+            lines.append(f'    <SW.Tag ID="{tag_id}">')
+            lines.append('      <AttributeList>')
+            lines.append(f'        <Name>{xml_escape(tag.name)}</Name>')
+            lines.append(f'        <DataType>{xml_escape(tag.data_type)}</DataType>')
             if tag.scope == TagScope.EXTERNAL:
                 if tag.connection:
-                    lines.append(f'            <Connection>{xml_escape(tag.connection)}</Connection>')
+                    lines.append(f'        <Connection>{xml_escape(tag.connection)}</Connection>')
                 if tag.address:
-                    lines.append(f'            <Address>{xml_escape(tag.address)}</Address>')
+                    lines.append(f'        <Address>{xml_escape(tag.address)}</Address>')
                 if tag.controller_tag:
-                    lines.append(f'            <ControllerTag>{xml_escape(tag.controller_tag)}</ControllerTag>')
+                    lines.append(f'        <ControllerTag>{xml_escape(tag.controller_tag)}</ControllerTag>')
                 if tag.acquisition_cycle:
-                    lines.append(f'            <AcquisitionCycle>{xml_escape(tag.acquisition_cycle)}</AcquisitionCycle>')
+                    lines.append(f'        <AcquisitionCycle>{xml_escape(tag.acquisition_cycle)}</AcquisitionCycle>')
             else:
-                lines.append('            <Connection></Connection>')
-            lines.append('          </AttributeList>')
+                lines.append('        <Connection></Connection>')
+            lines.append('      </AttributeList>')
             if tag.initial_value is not None:
-                lines.append(f'          <StartValue>{xml_escape(str(tag.initial_value))}</StartValue>')
-            lines.append('        </SW.Tag>')
+                lines.append(f'      <StartValue>{xml_escape(str(tag.initial_value))}</StartValue>')
+            lines.append('    </SW.Tag>')
 
         lines.extend([
-            '      </ObjectList>',
-            '    </SW.TagTable>',
             '  </SW.Blocks>',
             '</Document>',
         ])
@@ -182,13 +170,15 @@ class TagXmlBuilder:
           </Document>
         """
         langs = languages or ["zh-CN"]
+        doc_id = str(uuid.uuid4()).replace("-", "")[:8]
+        blocks_id = str(uuid.uuid4()).replace("-", "")[:8]
         sid = str(uuid.uuid4()).replace("-", "")[:8]
 
         lines = [
             '<?xml version="1.0" encoding="utf-8"?>',
-            f'<Document xmlns="{self._ns}">',
+            f'<Document ID="{doc_id}" xmlns="{self._ns}">',
             '  <Engineering version="V16"/>',
-            '  <SW.Blocks>',
+            f'  <SW.Blocks ID="{blocks_id}">',
             f'    <SW.TextList ID="{sid}">',
             '      <AttributeList>',
             f'        <Name>{xml_escape(list_name)}</Name>',

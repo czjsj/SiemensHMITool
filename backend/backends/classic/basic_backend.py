@@ -580,11 +580,8 @@ class BasicBackend(HmiBackend):
         item_id = item.id
 
         # 移除已知前缀以获取基础名
-        base_name = item_id
-        for prefix in ("BTN_", "MEM_", "STS_", "LMP_", "IO_", "SIO_"):
-            if item_id.startswith(prefix):
-                base_name = item_id[len(prefix):]
-                break
+        from backend.utils.tag_prefix_utils import strip_known_tag_prefixes
+        base_name = strip_known_tag_prefixes(item_id)
 
         # 查找匹配的 tag
         tag_names = {t.name for t in spec.tags}

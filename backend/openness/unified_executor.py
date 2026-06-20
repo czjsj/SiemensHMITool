@@ -222,6 +222,26 @@ class UnifiedOpennessExecutor:
             # Unified: hmiSoftware.Tags (direct collection)
             tags_collection = hmi_software.Tags
 
+            # V4.2: 反射确认 Create 方法可用
+            from backend.openness.reflection_utils import has_method, describe_dotnet_methods
+            if not has_method(tags_collection, "Create"):
+                dotnet_info = describe_dotnet_methods(tags_collection)
+                result.diagnostics.append(Diagnostic(
+                    code=DiagnosticCodes.UNIFIED_TAG_CREATE_METHOD_NOT_FOUND,
+                    severity=DiagnosticSeverity.ERROR,
+                    phase="P30_TAG_TABLES_AND_TAGS",
+                    message=(
+                        f"Unified Tags collection (type={dotnet_info.get('dotnet_type', 'Unknown')}) "
+                        f"lacks Create() method. "
+                        f"Available Create-like methods: {dotnet_info.get('create_like_methods', [])}. "
+                        f"Available Import-like methods: {dotnet_info.get('import_like_methods', [])}."
+                    ),
+                    details=dotnet_info,
+                    remediation="确认 TIA Portal 版本支持 hmiSoftware.Tags.Create。",
+                ))
+                result.success = False
+                return result
+
             for spec in tag_specs:
                 name = spec.get("name", "")
                 data_type = spec.get("data_type", "Bool")
@@ -241,16 +261,33 @@ class UnifiedOpennessExecutor:
                         result.api_calls.append(
                             f"hmiSoftware.Tags[exist]={name}")
                     else:
+                        # 真正的 .NET Create 调用 (之前只有日志)
+                        new_tag = tags_collection.Create(name, data_type)
                         result.api_calls.append(
                             f"hmiSoftware.Tags.Create({name}, {data_type})")
                         result.objects_created += 1
                 except Exception as e:
+                    # 检测 AttributeError 特殊处理
+                    if isinstance(e, AttributeError) and "Create" in str(e):
+                        code = DiagnosticCodes.UNIFIED_TAG_CREATE_METHOD_NOT_FOUND
+                        dotnet_info = describe_dotnet_methods(tags_collection)
+                        msg = (
+                            f"Unified Tags 创建变量 '{name}' 失败: "
+                            f"Tags collection (type={dotnet_info.get('dotnet_type', 'Unknown')}) "
+                            f"没有 Create 方法。"
+                        )
+                        details = dotnet_info
+                    else:
+                        code = DiagnosticCodes.IMPORT_TIA_EXCEPTION
+                        msg = f"Tag create failed '{name}': {e}"
+                        details = {}
                     result.diagnostics.append(Diagnostic(
-                        code=DiagnosticCodes.IMPORT_TIA_EXCEPTION,
+                        code=code,
                         severity=DiagnosticSeverity.ERROR,
                         phase="P30_TAG_TABLES_AND_TAGS",
                         object_name=name,
-                        message=f"Tag create failed '{name}': {e}",
+                        message=msg,
+                        details=details,
                     ))
 
             result.success = len(result.diagnostics) == 0

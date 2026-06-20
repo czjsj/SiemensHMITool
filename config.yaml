@@ -76,7 +76,7 @@ output:
   export_dir: exports
   encoding: utf-8-sig
   reference_xml: "\uFEFF<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Document>\n \
-    \ <Engineering version=\"V16\" />\n  <DocumentInfo>\n    <Created>2026-06-19T14:55:46.4731697Z</Created>\n\
+    \ <Engineering version=\"V16\" />\n  <DocumentInfo>\n    <Created>2026-06-20T10:36:18.7053909Z</Created>\n\
     \    <ExportSetting>WithDefaults</ExportSetting>\n    <InstalledProducts>\n  \
     \    <Product>\n        <DisplayName>Totally Integrated Automation Portal</DisplayName>\n\
     \        <DisplayVersion>V16 Update 8</DisplayVersion>\n      </Product>\n   \
@@ -124,8 +124,8 @@ output:
     >\n                        <Name>Light</Name>\n                      </Tag>\n\
     \                    </LinkList>\n                  </Hmi.Dynamic.TagElementTrigger>\n\
     \                  <Hmi.Dynamic.Range ID=\"9\" CompositionName=\"RangeValues\"\
-    >\n                    <AttributeList>\n                      <BackColor>222,\
-    \ 219, 222</BackColor>\n                      <FlashingType>No</FlashingType>\n\
+    >\n                    <AttributeList>\n                      <BackColor>217,\
+    \ 217, 217</BackColor>\n                      <FlashingType>No</FlashingType>\n\
     \                      <ForeColor>24, 28, 49</ForeColor>\n                   \
     \   <LowerLimit>0</LowerLimit>\n                      <UpperLimit>0</UpperLimit>\n\
     \                    </AttributeList>\n                  </Hmi.Dynamic.Range>\n\
