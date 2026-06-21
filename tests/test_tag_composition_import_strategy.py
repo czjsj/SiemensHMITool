@@ -134,6 +134,14 @@ class FakeHmiSw:
 class TestTagCompositionImportStrategy:
     """TagComposition 有 Import 时使用 Import，不调用 Create。"""
 
+    @pytest.fixture(autouse=True)
+    def _mock_xml_type_guard(self, monkeypatch):
+        """Bypass XML class type guard — these tests focus on Import strategy, not XML validation."""
+        monkeypatch.setattr(
+            "backend.xml_validator.validate_xml_class_for_import_target",
+            lambda *args, **kwargs: None,
+        )
+
     def test_import_used_when_create_missing(self, monkeypatch):
         """有 Import 无 Create → 调用 Import，不报 Create 不存在。"""
         tags_collection = FakeTagComposition(has_import=True, has_create=False)

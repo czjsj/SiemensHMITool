@@ -49,7 +49,7 @@ class ClassicCommon:
 
     def build_tags_xml(self, tags: list[TagSpec], table_name: str = "DefaultTagTable") -> str:
         """生成批量导出的 Tags XML（导入 DefaultTagTable）。"""
-        return self.tag_builder.build_tags_batch_export_xml(tags, table_name)
+        return self.tag_builder.build_tags_batch_export_xml(tags, table_name, output_kind="plc_blocks")
 
     def build_single_tag_xml(self, tag: TagSpec) -> str:
         """生成单个变量的导出 XML。"""

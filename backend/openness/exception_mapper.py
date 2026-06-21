@@ -64,20 +64,55 @@ class ExceptionMapper:
         msg = str(exception)
         msg_lower = msg.lower()
 
-        # V5.0: 特殊检测 — Siemens.Engineering.SW.Blocks 类别不匹配
-        # 当 TagComposition.Import 传入 PLC Blocks XML 时，TIA 抛出：
-        # "Class of the 'Siemens.Engineering.SW.Blocks' type at line number 4 ... is not supported"
-        if "sw.blocks" in msg_lower or "simens.engineering.sw.blocks" in msg_lower:
+        # V5.0: 特殊检测 — Siemens.Engineering.SW.Blocks / SW.Tag 类别不匹配
+        # 当 TagComposition.Import 传入 PLC Blocks 或 PLC Tag XML 时，TIA 抛出：
+        # "Class of the 'Siemens.Engineering.SW.Blocks' type ... is not supported"
+        # "Class of the 'Siemens.Engineering.SW.Tag' type ... is not supported"
+        tag_keywords = [
+            "sw.blocks", "simens.engineering.sw.blocks",
+            "sw.tag", "simens.engineering.sw.tag", "engineering.sw.tag",
+        ]
+        if any(x in msg_lower for x in tag_keywords):
             code = DiagnosticCodes.TAG_XML_WRONG_CLASS
+
+            # 检测是否为 SW.Tag 类型
+            if any(x in msg_lower for x in ["sw.tag", "simens.engineering.sw.tag", "engineering.sw.tag"]):
+                actual = "Siemens.Engineering.SW.Tag"
+                xml_class_detected = "Siemens.Engineering.SW.Tag"
+                message = (
+                    "HMI 变量同步失败：当前导入目标是 HMI 标签集合 TagComposition.Import，"
+                    "但生成的 XML 是 PLC Software Tag 类型 (Siemens.Engineering.SW.Tag)。"
+                    "HMI Tag XML 不能使用 PLC Tag XML 格式。请检查 HMI Tag XML 生成器。"
+                )
+                remediation = (
+                    "HMI tag XML 不能包含 SW.Tag 元素。SW.Tag 是 PLC 软件标签类型。"
+                    "HMI TagComposition.Import 只接受 HMI 标签类型。"
+                    "请使用正确的 HMI tag XML 模板或通过 API 创建 HMI 标签。"
+                )
+            else:
+                # SW.Blocks 检测路径（保持不变）
+                actual = "Siemens.Engineering.SW.Blocks"
+                xml_class_detected = "Siemens.Engineering.SW.Blocks"
+                message = (
+                    "HMI 变量同步失败：导入目标是 HMI 标签集合 (TagComposition)，"
+                    "但生成的 XML 是 PLC Blocks 类型 (Siemens.Engineering.SW.Blocks)。"
+                    "请检查变量 XML 生成器是否误用了 PLC block SimaticML，"
+                    "HMI Tag XML 不应包含 <SW.Blocks> 包装。"
+                )
+                remediation = (
+                    "修复 tag_xml_builder.py：HMI tag XML 不得包含 SW.Blocks 包装。"
+                    "SW.Blocks 是 PLC 软件块容器，TagComposition.Import 只接受 HMI Tag/TagTable XML。"
+                )
+
             details: dict[str, Any] = {
                 "exception_type": type(exception).__name__,
                 "traceback": traceback.format_exc(),
                 "expected": "HMI Tag XML",
-                "actual": "Siemens.Engineering.SW.Blocks",
+                "actual": actual,
                 "target": "Siemens.Engineering.Hmi.Tag.TagComposition.Import",
                 "line": 4,
                 "simatic_ml_id": "e5238134",
-                "xml_class_detected": "Siemens.Engineering.SW.Blocks",
+                "xml_class_detected": xml_class_detected,
             }
             if context:
                 details["context"] = context
@@ -90,17 +125,9 @@ class ExceptionMapper:
                 phase=phase,
                 object_type=object_type,
                 object_name=object_name,
-                message=(
-                    "HMI 变量同步失败：导入目标是 HMI 标签集合 (TagComposition)，"
-                    "但生成的 XML 是 PLC Blocks 类型 (Siemens.Engineering.SW.Blocks)。"
-                    "请检查变量 XML 生成器是否误用了 PLC block SimaticML，"
-                    "HMI Tag XML 不应包含 <SW.Blocks> 包装。"
-                ),
+                message=message,
                 details=details,
-                remediation=(
-                    "修复 tag_xml_builder.py：HMI tag XML 不得包含 SW.Blocks 包装。"
-                    "SW.Blocks 是 PLC 软件块容器，TagComposition.Import 只接受 HMI Tag/TagTable XML。"
-                ),
+                remediation=remediation,
             )
 
         # 匹配已知模式

@@ -987,6 +987,9 @@ class OpennessManager:
         返回:
             {"ok": True/False, "created": [...], "skipped": [...], "errors": [...]}
         """
+        import logging
+        logger = logging.getLogger(__name__)
+
         result: dict = {"ok": False, "created": [], "skipped": [], "errors": []}
 
         if not self._project:
@@ -1068,8 +1071,12 @@ class OpennessManager:
             # V4.2: 根据家族路由到正确的 executor
             if hmi_family in ("Basic", "Comfort", "Classic"):
                 # 经典路径：TagXmlBuilder 生成 XML + import_hmi_tags_safe（XML Import 主路径）
+                # TODO V5.1: Replace XML import with HMI tag API-based creation
+                # (TagComposition lacks Create() but TagTable may support it)
+                # Currently using XML import as the available mechanism.
+                # XML format must NOT contain Siemens.Engineering.SW.* types.
                 from backend.openness.classic_executor import ClassicOpennessExecutor
-                from backend.backends.classic.tag_xml_builder import TagXmlBuilder
+                from backend.backends.classic.tag_xml_builder import TagXmlBuilder, HmiTagXmlBuilder
                 from backend.domain.ir_v2 import TagSpec
                 from backend.domain.enums import TagScope
 
@@ -1104,13 +1111,28 @@ class OpennessManager:
                         item["connection"] = conn
                     tag_items.append(item)
 
-                xml_builder = TagXmlBuilder()
-                tags_xml = xml_builder.build_tags_batch_export_xml(
-                    tag_specs, table_name="DefaultTagTable",
-                )
+                hmi_builder = HmiTagXmlBuilder()
+                tags_xml = hmi_builder.build_batch_tags_xml(tag_items)
                 executor = ClassicOpennessExecutor()
                 # V4.2: XML Import 主路径（无 UPSERT Create 回退）
                 step_result = executor.import_hmi_tags_safe(sw, tags_xml, tag_items)
+
+                # Enhanced diagnostic for SW.Tag/SW.Blocks type mismatch
+                for d in step_result.diagnostics:
+                    if d.code == "TAG_XML_WRONG_CLASS":
+                        logger.error(
+                            "HMI 变量同步阻断：XML 类型错误。TagComposition.Import 只能导入 HMI tag XML，"
+                            "但当前 XML 的类型被判定为 PLC 类型。请检查 TagXmlBuilder 生成逻辑。"
+                        )
+                        # Log the XML snippet for debugging
+                        if hasattr(step_result, 'temp_files') and step_result.temp_files:
+                            for tf in step_result.temp_files:
+                                try:
+                                    with open(tf, 'r', encoding='utf-8') as f:
+                                        content = f.read()
+                                    logger.debug("Failed XML content:\n%s", content[:500])
+                                except Exception:
+                                    pass
 
                 if step_result.success:
                     result["created"] = [t["name"] for t in new_tags]

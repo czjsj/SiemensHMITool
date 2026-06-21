@@ -352,9 +352,8 @@ def validate_xml_class_for_import_target(xml_path: str, target_kind: str):
 
     检测内容:
         对于 'hmi_tags':
-          - 检查 XML 中是否包含 <SW.Blocks> 元素 → 拒绝
-          - 检查 XML 中是否包含 PLC 对象类型 (OB, FB, FC, DB) → 拒绝
-          - 只允许 SW.Tag, SW.TagTable, Hmi.Tag.* 等 HMI 标签相关类型
+          - 检查 XML 中是否包含任何 SW.* 或 PLC 指示器 (SW.Tag, SW.TagTable, SW.Blocks, OB, FB, FC, DB, PlcTag, Siemens.Engineering.SW.*) → 拒绝
+          - 只允许 Hmi.Tag.*, SW.TextList 等 HMI 标签相关类型
         对于 'hmi_screen':
           - 检查根对象是否为 Screen 相关类型
         对于 'plc_blocks':
@@ -419,8 +418,6 @@ def validate_xml_class_for_import_target(xml_path: str, target_kind: str):
     def _has_hmi_tag_indicators(content: str) -> bool:
         """检测 XML 中是否包含 HMI 标签元素。"""
         hmi_patterns = [
-            r'<SW\.Tag\b',
-            r'<SW\.TagTable\b',
             r'Hmi\.Tag\.',
             r'<SW\.TextList\b',
         ]
@@ -429,16 +426,62 @@ def validate_xml_class_for_import_target(xml_path: str, target_kind: str):
                 return True
         return False
 
+    def _has_any_sw_indicator(content: str) -> tuple[bool, str, int]:
+        """检测 XML 中是否包含任何 SW.* 或 PLC 指示器。返回 (found, type_name, line)。
+
+        自动跳过 XML 注释中的匹配，避免注释中的 SW.Tag 引用导致误报。
+        """
+        sw_plc_patterns = [
+            (r'<SW\.Tag\b', "SW.Tag (PLC Software Tag)"),
+            (r'Siemens\.Engineering\.SW\.', "Siemens.Engineering.SW.*"),
+            (r'<SW\.Blocks[>\s]', "SW.Blocks"),
+            (r'<SW\.TagTable\b', "SW.TagTable"),
+            (r'<PlcTag\b', "PlcTag"),
+            (r'<OB\b[^>]*/>', "OB (Organization Block)"),
+            (r'<FB\b[^>]*/>', "FB (Function Block)"),
+            (r'<FC\b[^>]*/>', "FC (Function)"),
+            (r'<DB\b[^>]*/>', "DB (Data Block)"),
+        ]
+
+        # 逐行检测，跳过注释行中的匹配
+        lines = content.split("\n")
+        in_comment = False
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if stripped.startswith("<!--"):
+                in_comment = True
+            if in_comment:
+                if "-->" in stripped:
+                    in_comment = False
+                continue
+            for pattern, type_name in sw_plc_patterns:
+                if re.search(pattern, line):
+                    return True, type_name, i
+        return False, "", 0
+
     # 检查 Document 的 xmlns 命名空间
     ns = root.get("xmlns", "")
     root_local = _local(root.tag)
 
-    if root_local != "Document":
+    # TIA Portal XML 根元素有两种:
+    #   - Screen / 画面 XML: 根元素为 <Document>
+    #   - HMI Tag XML:        根元素为 <Engineering> (HmiTagML 命名空间)
+    # 两者都是合法的，需要根据 target_kind 进一步判断
+    if root_local not in ("Document", "Engineering"):
         raise ValueError(
-            f"[TAG_XML_WRONG_CLASS] XML 根元素不是 Document: '{root_local}'"
+            f"[TAG_XML_WRONG_CLASS] XML 根元素不是 Document 或 Engineering: '{root_local}'"
         )
 
     if target_kind == "hmi_tags":
+        # V5.0+: 先检查 SW.* / PLC 指示器 (SW.Tag, Siemens.Engineering.SW.*, SW.Blocks, 等)
+        has_sw, sw_type, line_no = _has_any_sw_indicator(xml_content)
+        if has_sw:
+            raise ValueError(
+                f"[TAG_XML_WRONG_CLASS] HMI TagComposition.Import 不能导入 PLC Software XML。"
+                f"expected=HMI Tag XML, actual={sw_type}, "
+                f"target=Siemens.Engineering.Hmi.Tag.TagComposition.Import"
+            )
+
         # 检查 PLC blocks 指示器
         has_plc, plc_type, line_no = _has_plc_block_indicators(xml_content)
         if has_plc:
@@ -473,7 +516,7 @@ def validate_xml_class_for_import_target(xml_path: str, target_kind: str):
                         first_line = xml_content.count("\n", 0, m.start()) + 1
                     break
             raise ValueError(
-                f"[TAG_XML_WRONG_CLASS] XML 中未找到 HMI Tag 元素 (SW.Tag/SW.TagTable)。"
+                f"[TAG_XML_WRONG_CLASS] XML 中未找到 HMI Tag 元素 (Hmi.Tag.* / SW.TextList)。"
                 f"  first_element={first_class} at line {first_line}\n"
                 f"  failed_xml_path={xml_path}"
             )
@@ -626,3 +669,196 @@ def validate_for_import_target(xml_path: str, target: str = "hmi_tags"):
                     result.valid = False
 
     return result
+
+
+# ========================================================================
+# V5.x: 标签 XML 类型检测与细粒度导入校验
+# ========================================================================
+
+def detect_hmi_tag_xml_kind(xml_path: str) -> str:
+    """Detect the kind of HMI/PLC tag XML file.
+
+    Reads the XML and inspects element tags and Class attributes to classify
+    the file as one of:
+      - "individual_hmi_tag": contains Hmi.Tag.Tag element
+      - "hmi_tag_table":      contains Hmi.Tag.TagTable element
+      - "plc_tag":            contains SW.Tag element
+      - "unknown":            none of the above or file unreadable
+
+    Parameters:
+        xml_path: Path to the XML file.
+
+    Returns:
+        One of the four kind strings listed above.
+    """
+    import os
+
+    if not os.path.isfile(xml_path):
+        return "unknown"
+
+    try:
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+    except ET.ParseError:
+        return "unknown"
+
+    def _local(tag: str) -> str:
+        if "}" in tag:
+            tag = tag.rsplit("}", 1)[-1]
+        if "." in tag:
+            tag = tag.rsplit(".", 1)[-1]
+        return tag
+
+    found_individual_tag = False
+    found_tag_table = False
+    found_sw_tag = False
+
+    for elem in root.iter():
+        local = _local(elem.tag)
+        cls = elem.get("Class", "")
+
+        # Check TagTable before Tag (Tag is a substring of TagTable)
+        if "Hmi.Tag.TagTable" in cls:
+            found_tag_table = True
+        elif "Hmi.Tag.Tag" in cls:
+            found_individual_tag = True
+
+        if local == "SW.Tag":
+            found_sw_tag = True
+
+    # Return per priority: individual > table > plc > unknown
+    if found_individual_tag:
+        return "individual_hmi_tag"
+    if found_tag_table:
+        return "hmi_tag_table"
+    if found_sw_tag:
+        return "plc_tag"
+
+    # Regex fallback for edge cases where Class attribute may not be on
+    # the expected element or the element tree is partial.
+    with open(xml_path, "r", encoding="utf-8-sig", errors="ignore") as f:
+        content = f.read()
+
+    if re.search(r'<SW\.Tag\b', content):
+        return "plc_tag"
+    if re.search(r'Class="[^"]*Hmi\.Tag\.TagTable[^"]*"', content):
+        return "hmi_tag_table"
+    if re.search(r'Class="[^"]*Hmi\.Tag\.Tag(?!Table)[^"]*"', content):
+        return "individual_hmi_tag"
+
+    return "unknown"
+
+
+def validate_tag_xml_for_import_target(xml_path: str, target: str) -> None:
+    """Validate that an XML file's tag kind matches the expected import target.
+
+    Unlike validate_for_import_target() (which returns ValidationResult and
+    covers broader categories like hmi_tags / hmi_screen / plc_blocks), this
+    function raises ValueError immediately on mismatch and focuses on
+    fine-grained tag type discrimination:
+      individual HMI tags  vs.  tag tables  vs.  PLC tags.
+
+    Parameters:
+        xml_path: Path to the XML file.
+        target: Expected tag kind, one of:
+            - "hmi_individual_tag": Individual HMI tag (Hmi.Tag.Tag)
+            - "hmi_tag_table":      HMI tag table (Hmi.Tag.TagTable)
+            - "plc_tag":            PLC software tag (SW.Tag)
+
+    Raises:
+        ValueError: With [TAG_XML_WRONG_CLASS] prefix if:
+            - target is not one of the valid options
+            - XML file does not exist or cannot be parsed
+            - Detected XML kind does not match the expected target
+            - HMI targets contain forbidden SW.* / Siemens.Engineering.SW.* elements
+    """
+    import os
+
+    VALID_TARGETS = ("hmi_individual_tag", "hmi_tag_table", "plc_tag")
+    if target not in VALID_TARGETS:
+        raise ValueError(
+            f"[TAG_XML_WRONG_CLASS] 未知的导入目标类型: '{target}'。"
+            f"支持: {', '.join(VALID_TARGETS)}"
+        )
+
+    if not os.path.isfile(xml_path):
+        raise ValueError(f"[TAG_XML_WRONG_CLASS] XML 文件不存在: {xml_path}")
+
+    try:
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+    except ET.ParseError as e:
+        raise ValueError(f"[TAG_XML_WRONG_CLASS] XML 解析失败: {e}") from e
+
+    with open(xml_path, "r", encoding="utf-8-sig", errors="ignore") as f:
+        xml_content = f.read()
+
+    detected = detect_hmi_tag_xml_kind(xml_path)
+
+    # --- helpers -----------------------------------------------------------
+    def _has_sw_indicators() -> tuple[bool, str]:
+        """Return (has_sw, description) while skipping XML comment blocks."""
+        sw_patterns = [
+            (r'Siemens\.Engineering\.SW\.', "Siemens.Engineering.SW.*"),
+            (r'<SW\.Tag\b', "SW.Tag"),
+            (r'<SW\.Blocks\b', "SW.Blocks"),
+            (r'<SW\.TagTable\b', "SW.TagTable"),
+        ]
+        lines = xml_content.split("\n")
+        in_comment = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("<!--"):
+                in_comment = True
+            if in_comment:
+                if "-->" in stripped:
+                    in_comment = False
+                continue
+            for pattern, desc in sw_patterns:
+                if re.search(pattern, line):
+                    return True, desc
+        return False, ""
+
+    # --- target-specific checks -------------------------------------------
+    if target == "hmi_individual_tag":
+        # Must contain Hmi.Tag.Tag or CompositionName="Tags"
+        has_composition_tags = any(
+            e.get("CompositionName") == "Tags" for e in root.iter()
+        )
+        if detected != "individual_hmi_tag" and not has_composition_tags:
+            raise ValueError(
+                f"[TAG_XML_WRONG_CLASS] 期望 HMI 个体变量 (Hmi.Tag.Tag) 或 "
+                f'CompositionName="Tags"，但检测到 \'{detected}\'。'
+                f"xml_path={xml_path}"
+            )
+        # Must NOT contain Siemens.Engineering.SW.* / SW.Tag / SW.Blocks
+        has_sw, sw_desc = _has_sw_indicators()
+        if has_sw:
+            raise ValueError(
+                f"[TAG_XML_WRONG_CLASS] HMI 个体变量 XML 不应包含 {sw_desc}。"
+                f"xml_path={xml_path}"
+            )
+
+    elif target == "hmi_tag_table":
+        # Must contain HMI tag table object
+        if detected != "hmi_tag_table":
+            raise ValueError(
+                f"[TAG_XML_WRONG_CLASS] 期望 HMI 变量表 (Hmi.Tag.TagTable)，"
+                f"但检测到 '{detected}'。xml_path={xml_path}"
+            )
+        # Must NOT contain Siemens.Engineering.SW.*
+        has_sw, sw_desc = _has_sw_indicators()
+        if has_sw:
+            raise ValueError(
+                f"[TAG_XML_WRONG_CLASS] HMI 变量表 XML 不应包含 {sw_desc}。"
+                f"xml_path={xml_path}"
+            )
+
+    elif target == "plc_tag":
+        # Must contain SW.Tag
+        if detected != "plc_tag":
+            raise ValueError(
+                f"[TAG_XML_WRONG_CLASS] 期望 PLC 变量 (SW.Tag)，"
+                f"但检测到 '{detected}'。xml_path={xml_path}"
+            )
+        # plc_tag is the only target that allows SW.* — no further checks.

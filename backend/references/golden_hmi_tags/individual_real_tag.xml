@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Golden Template: Individual Real (Float) Tag (Internal / No PLC Connection)
+
+  PURPOSE:
+    This is a PLACEHOLDER for a real TIA Portal HMI Real (floating-point) tag
+    export. It demonstrates the expected XML structure for internal (HMI-only)
+    Real variables. There is no PLC address or connection.
+
+  HOW TO REPLACE WITH REAL DATA:
+    1. Open TIA Portal and create a Real tag in an HMI tag table.
+    2. Export the tag table (right-click -> Export).
+    3. Locate the <Hmi.Tag.Tag> element for the Real tag.
+    4. Copy the element structure here, replacing concrete values with
+       {{TAG_NAME}}, {{DATA_TYPE}}, {{ADDRESS}}, {{CONNECTION}},
+       {{COMMENT}}, and {{DEFAULT_TAG_TABLE}} markers.
+
+  PLACEHOLDERS (replaced by HmiTagXmlBuilder at runtime):
+    {{TAG_NAME}}          - Variable name (e.g. "Motor_Speed")
+    {{DATA_TYPE}}         - Data type, must be "Real" for this template
+    {{ADDRESS}}           - Empty string for internal tags
+    {{CONNECTION}}        - Empty string for internal tags
+    {{COMMENT}}           - Variable comment text
+    {{DEFAULT_TAG_TABLE}} - Tag table name (default: "DefaultTagTable")
+
+  TYPICAL USE CASES:
+    - HMI-local setpoints or thresholds
+    - Display-only calculated values
+    - Internal analog values not mapped to PLC
+
+  NOTE:
+    The element MUST be <Hmi.Tag.Tag>, NOT <SW.Tag>.
+-->
+<Engineering version="V16" xmlns="http://www.siemens.com/automation/HmiTagML">
+  <Hmi.Tag.Tag ID="{{TAG_ID}}" CompositionName="Tags" DataType="{{DATA_TYPE}}">
+    <AttributeList>
+      <Name>{{TAG_NAME}}</Name>
+      <!-- Internal tag: no Address, no Connection -->
+      <DefaultTagTable>{{DEFAULT_TAG_TABLE}}</DefaultTagTable>
+      <Comment>{{COMMENT}}</Comment>
+    </AttributeList>
+  </Hmi.Tag.Tag>
+</Engineering>

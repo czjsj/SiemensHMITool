@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Golden Template: Individual Boolean Tag (Internal / No PLC Connection)
+
+  PURPOSE:
+    This is a PLACEHOLDER for a real TIA Portal HMI boolean tag export.
+    It demonstrates the expected XML structure for internal (HMI-only) boolean
+    variables. There is no PLC address or connection -- the variable lives
+    entirely within the HMI runtime.
+
+  HOW TO REPLACE WITH REAL DATA:
+    1. Open TIA Portal and create a Bool tag in an HMI tag table.
+    2. Export the tag table (right-click -> Export).
+    3. Locate the <Hmi.Tag.Tag> element for the boolean tag.
+    4. Copy the element structure here, replacing placeholder values with
+       {{TAG_NAME}}, {{DATA_TYPE}}, {{ADDRESS}}, {{CONNECTION}},
+       {{COMMENT}}, and {{DEFAULT_TAG_TABLE}} markers.
+    5. Ensure ID="..." is set to a dynamic or placeholder value.
+
+  PLACEHOLDERS (replaced by HmiTagXmlBuilder at runtime):
+    {{TAG_NAME}}          - Variable name (e.g. "Motor_Running")
+    {{DATA_TYPE}}         - Data type, must be "Bool" for this template
+    {{ADDRESS}}           - Empty string for internal tags
+    {{CONNECTION}}        - Empty string for internal tags
+    {{COMMENT}}           - Variable comment text
+    {{DEFAULT_TAG_TABLE}} - Tag table name (default: "DefaultTagTable")
+
+  NOTE:
+    The element MUST be <Hmi.Tag.Tag>, NOT <SW.Tag>.
+    Using <SW.Tag> with Hmi.Tag.TagComposition.Import will fail.
+-->
+<Engineering version="V16" xmlns="http://www.siemens.com/automation/HmiTagML">
+  <Hmi.Tag.Tag ID="{{TAG_ID}}" CompositionName="Tags" DataType="{{DATA_TYPE}}">
+    <AttributeList>
+      <Name>{{TAG_NAME}}</Name>
+      <!-- Internal tag: no Connection -->
+      <!-- DefaultTagTable omitted; import target already specifies table -->
+      <Comment>{{COMMENT}}</Comment>
+    </AttributeList>
+  </Hmi.Tag.Tag>
+</Engineering>

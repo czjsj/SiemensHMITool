@@ -31,9 +31,9 @@ class TestImportHmiTagsSafe:
         """ImportOptions 可用时走 XML Import 路径。"""
         executor = ClassicOpennessExecutor()
 
+        mock_tag = _make_tag_mock("Test1")
         mock_tags_coll = MagicMock()
-        # Return a tag that matches expected, so verification passes
-        mock_tags_coll.__iter__.return_value = [_make_tag_mock("Test1")]
+        mock_tags_coll.__iter__.return_value = [mock_tag]
         mock_tags_coll.Import = MagicMock()
 
         mock_default_table = MagicMock()
@@ -45,32 +45,50 @@ class TestImportHmiTagsSafe:
         mock_hmi = MagicMock()
         mock_hmi.TagFolder = mock_tag_folder
 
+        # V5.1: patch enumerate_existing_hmi_tags 返回空集（无已有变量）
         with patch.object(
-            ClassicOpennessExecutor, "resolve_import_option",
-            return_value={
-                "ok": True, "value": 1, "selected": "Override",
-                "available": ["Default", "Override"],
-                "source": "direct:Hmi.ImportOptions",
-                "error": None, "diagnostics": [],
-            },
+            ClassicOpennessExecutor, "enumerate_existing_hmi_tags",
+            return_value=set(),
         ):
+            # V5.1: 先让 overload resolver 失败，fallback 到 standard resolver
             with patch.object(
-                ClassicOpennessExecutor, "_make_import_options",
-                return_value=MagicMock(),
+                ClassicOpennessExecutor, "resolve_import_option_from_overload",
+                return_value={
+                    "ok": False, "error": "Not available",
+                    "available": [], "source": "none",
+                    "diagnostics": [],
+                },
             ):
-                with patch.object(executor, "_write_temp_xml", return_value="/tmp/tags.xml"):
-                    tags_xml = '<Document xmlns="x"><SW.Tag><Name>Test1</Name></SW.Tag></Document>'
-                    tag_items = [{"name": "Test1", "data_type": "Bool", "scope": "internal"}]
+                with patch.object(
+                    ClassicOpennessExecutor, "resolve_import_option",
+                    return_value={
+                        "ok": True, "value": 1, "selected": "Override",
+                        "available": ["Default", "Override"],
+                        "source": "direct:Hmi.ImportOptions",
+                        "error": None, "diagnostics": [],
+                    },
+                ):
+                    with patch.object(
+                        ClassicOpennessExecutor, "_make_import_options",
+                        return_value=MagicMock(),
+                    ):
+                        with patch.object(executor, "_write_temp_xml", return_value="/tmp/tags.xml"):
+                            with patch(
+                                "backend.xml_validator.validate_xml_class_for_import_target",
+                                return_value=None,
+                            ):
+                                tags_xml = '<Document xmlns="x"><SW.Tag><Name>Test1</Name></SW.Tag></Document>'
+                                tag_items = [{"name": "Test1", "data_type": "Bool", "scope": "internal"}]
 
-                    result = executor.import_hmi_tags_safe(mock_hmi, tags_xml, tag_items)
+                                result = executor.import_hmi_tags_safe(mock_hmi, tags_xml, tag_items)
 
-                    assert result.success is True, (
-                        f"Expected success, got: {[d.message for d in result.diagnostics]}"
-                    )
-                    assert any(
-                        "strategy_used=ImportOptions" in str(c)
-                        for c in result.api_calls
-                    )
+                            assert result.success is True, (
+                                f"Expected success, got: {[d.message for d in result.diagnostics]}"
+                            )
+                            assert any(
+                                "TagFolder.DefaultTagTable.Tags.Import" in str(c)
+                                for c in result.api_calls
+                            )
 
     def test_xml_import_fails_returns_error_no_upsert(self):
         """XML 导入失败时不回退 UPSERT，直接返回错误。"""
@@ -103,21 +121,25 @@ class TestImportHmiTagsSafe:
                 mock_hmi.TagFolder = mock_folder
 
                 with patch.object(executor, "_write_temp_xml", return_value="/tmp/tags.xml"):
-                    result = executor.import_hmi_tags_safe(
-                        mock_hmi,
-                        '<Document><SW.Tag><Name>Test1</Name></SW.Tag></Document>',
-                        [{"name": "Test1", "data_type": "Bool", "scope": "internal"}],
-                    )
+                    with patch(
+                        "backend.xml_validator.validate_xml_class_for_import_target",
+                        return_value=None,
+                    ):
+                        result = executor.import_hmi_tags_safe(
+                            mock_hmi,
+                            '<Document><SW.Tag><Name>Test1</Name></SW.Tag></Document>',
+                            [{"name": "Test1", "data_type": "Bool", "scope": "internal"}],
+                        )
 
-                    assert result.success is False
-                    has_tag_xml_failed = any(
-                        d.code == DiagnosticCodes.TAG_XML_IMPORT_FAILED
-                        for d in result.diagnostics
-                    )
-                    assert has_tag_xml_failed, (
-                        f"Expected TAG_XML_IMPORT_FAILED, got: "
-                        f"{[d.code for d in result.diagnostics]}"
-                    )
+                        assert result.success is False
+                        has_tag_xml_failed = any(
+                            d.code == DiagnosticCodes.TAG_XML_IMPORT_FAILED
+                            for d in result.diagnostics
+                        )
+                        assert has_tag_xml_failed, (
+                            f"Expected TAG_XML_IMPORT_FAILED, got: "
+                            f"{[d.code for d in result.diagnostics]}"
+                        )
 
     def test_import_failure_blocks_no_upsert_fallback(self):
         """Import 失败时返回 TAG_XML_IMPORT_FAILED，不调用 UPSERT。"""
@@ -148,17 +170,21 @@ class TestImportHmiTagsSafe:
                 mock_hmi = MagicMock()
                 mock_hmi.TagFolder = mock_folder
 
-                result = executor.import_hmi_tags_safe(
-                    mock_hmi,
-                    '<Document><SW.Tag><Name>X</Name></SW.Tag></Document>',
-                    [{"name": "X", "data_type": "Bool", "scope": "internal"}],
-                )
+                with patch(
+                    "backend.xml_validator.validate_xml_class_for_import_target",
+                    return_value=None,
+                ):
+                    result = executor.import_hmi_tags_safe(
+                        mock_hmi,
+                        '<Document><SW.Tag><Name>X</Name></SW.Tag></Document>',
+                        [{"name": "X", "data_type": "Bool", "scope": "internal"}],
+                    )
 
-                assert result.success is False
-                error_codes = [d.code for d in result.diagnostics if hasattr(d, 'code')]
-                assert DiagnosticCodes.TAG_XML_IMPORT_FAILED in error_codes, (
-                    f"Expected TAG_XML_IMPORT_FAILED, got: {error_codes}"
-                )
+                    assert result.success is False
+                    error_codes = [d.code for d in result.diagnostics if hasattr(d, 'code')]
+                    assert DiagnosticCodes.TAG_XML_IMPORT_FAILED in error_codes, (
+                        f"Expected TAG_XML_IMPORT_FAILED, got: {error_codes}"
+                    )
 
     def test_xml_import_failure_with_no_tag_items_returns_error(self):
         """无 tag_items 时 XML 导入失败应返回错误。"""

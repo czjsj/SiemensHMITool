@@ -76,7 +76,7 @@ output:
   export_dir: exports
   encoding: utf-8-sig
   reference_xml: "\uFEFF<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Document>\n \
-    \ <Engineering version=\"V16\" />\n  <DocumentInfo>\n    <Created>2026-06-20T10:36:18.7053909Z</Created>\n\
+    \ <Engineering version=\"V16\" />\n  <DocumentInfo>\n    <Created>2026-06-21T08:07:27.4088094Z</Created>\n\
     \    <ExportSetting>WithDefaults</ExportSetting>\n    <InstalledProducts>\n  \
     \    <Product>\n        <DisplayName>Totally Integrated Automation Portal</DisplayName>\n\
     \        <DisplayVersion>V16 Update 8</DisplayVersion>\n      </Product>\n   \
@@ -354,3 +354,10 @@ server:
   host: 127.0.0.1
   port: 5000
   debug: true
+hmi_tag_sync:
+  strategy: auto
+  allow_api_create: false
+  allow_hmi_xml_import: true
+  allow_existing_tags_only: true
+  golden_template_dir: backend/references/golden_hmi_tags
+  default_tag_table: DefaultTagTable

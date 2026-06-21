@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Engineering version="V17" xmlns="http://www.siemens.com/automation/HmiTagML">
+  <Hmi.Tag.Tag ID="d230c8da" CompositionName="Tags">
+    <AttributeList>
+      <Name>NewTag</Name>
+      <DataType>Bool</DataType>
+      <DefaultTagTable>DefaultTagTable</DefaultTagTable>
+    </AttributeList>
+  </Hmi.Tag.Tag>
+</Engineering>

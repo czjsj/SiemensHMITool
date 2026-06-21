@@ -148,18 +148,71 @@ class BasicBackend(HmiBackend):
         # ------------------------------------------------------------------
         required_tag_names: list[str] = []
         tags_xml = ""
+        tag_items_for_fallback: list[dict] = []
         if spec and spec.tags:
             # 收集所有 tag 名称作为 required
             required_tag_names = [t.name for t in spec.tags if t.name]
 
-            # 为每个变量生成真实 Basic 单变量导出 XML
-            tag_xml_list: list[str] = []
-            for tag in spec.tags:
-                single_xml = self._common.build_single_tag_xml(tag)
-                tag_xml_list.append(single_xml)
+            # V5.1: 构建 tag_items_for_fallback（在所有路径之前）
+            for t in spec.tags:
+                item: dict = {
+                    "name": t.name,
+                    "data_type": t.data_type,
+                    "scope": t.scope.value if hasattr(t.scope, 'value') else str(t.scope),
+                }
+                if t.address:
+                    item["address"] = t.address
+                if t.connection:
+                    item["connection"] = t.connection
+                tag_items_for_fallback.append(item)
 
-            # 也生成批量 XML 供导入
-            tags_xml = self._common.build_tags_xml(spec.tags, table_name="DefaultTagTable")
+            # V5.1: 预检查已有变量 — 若全部已存在则跳过 XML 生成和导入
+            existing_tags_set = tia_executor.enumerate_existing_hmi_tags(hmi_sw)
+            required_set = set(required_tag_names)
+            already_existing = required_set & existing_tags_set
+            missing_for_import = sorted(required_set - existing_tags_set)
+
+            if already_existing:
+                diags.append(Diagnostic(
+                    code=DiagnosticCodes.VERIFY_TAG_MISSING,
+                    severity=DiagnosticSeverity.INFO,
+                    phase="P30_TAG_TABLES_AND_TAGS",
+                    object_type="tag",
+                    message=(
+                        f"HMI DefaultTagTable 中已存在 {len(already_existing)} 个变量: "
+                        f"{sorted(already_existing)[:10]}"
+                        f"{'...' if len(already_existing) > 10 else ''}"
+                    ),
+                ))
+
+            if not missing_for_import:
+                # 所有变量已存在 — 跳过 XML 生成和导入
+                import logging
+                logging.getLogger(__name__).info(
+                    "Step 1: all %d required tags already exist in DefaultTagTable, skipping import",
+                    len(required_tag_names),
+                )
+                tags_xml = ""
+            else:
+                import logging
+                logging.getLogger(__name__).info(
+                    "Step 1: %d tags missing, will attempt import: %s",
+                    len(missing_for_import), missing_for_import[:10],
+                )
+
+                # 为每个变量生成真实 Basic 单变量导出 XML
+                # V5.0: build_single_tag_xml 默认 output_kind="hmi_tags" 会抛出
+                # NotImplementedError（HMI Tag XML 格式未知）。跳过即可。
+                tag_xml_list: list[str] = []
+                for tag in spec.tags:
+                    try:
+                        single_xml = self._common.build_single_tag_xml(tag)
+                        tag_xml_list.append(single_xml)
+                    except NotImplementedError:
+                        pass  # HMI Tag XML 格式未知，跳过单变量 XML 生成
+
+                # 也生成批量 XML 供导入
+                tags_xml = self._common.build_tags_xml(spec.tags, table_name="DefaultTagTable")
 
             # 记录日志
             artifact_data["imported_tag_names"] = [t.name for t in spec.tags]
@@ -168,18 +221,62 @@ class BasicBackend(HmiBackend):
             ]
 
         # 导入变量
-        if tags_xml:
-            tag_result = tia_executor.import_tags_to_default_table(hmi_sw, tags_xml)
+        if tags_xml or tag_items_for_fallback:
+            tag_result = tia_executor.import_tags_to_default_table(
+                hmi_sw, tags_xml, tag_items=tag_items_for_fallback if tag_items_for_fallback else None,
+            )
             diags.extend(tag_result.diagnostics)
+
             if not tag_result.success:
-                return DeploymentResult(
-                    success=False,
-                    status=DeploymentStatus.FAILED,
-                    plan_id=plan.plan_id,
-                    backend="basic_classic",
-                    diagnostics=diags,
-                    details={"failed_step": "tags_import", "artifact_log": artifact_data},
+                # V5.1: 检查是否因 HMI_TAG_XML_TEMPLATE_MISSING 导致失败
+                # 但实际变量已全部存在 → 视为成功
+                has_template_missing = any(
+                    d.code == DiagnosticCodes.HMI_TAG_XML_TEMPLATE_MISSING
+                    for d in tag_result.diagnostics
                 )
+                if has_template_missing and tag_items_for_fallback:
+                    recheck_existing = tia_executor.enumerate_existing_hmi_tags(hmi_sw)
+                    recheck_required = {t["name"] for t in tag_items_for_fallback if t.get("name")}
+                    if recheck_required and recheck_required.issubset(recheck_existing):
+                        import logging
+                        logging.getLogger(__name__).info(
+                            "HMI_TAG_XML_TEMPLATE_MISSING but all %d tags already exist, treating as success",
+                            len(recheck_required),
+                        )
+                        diags.append(Diagnostic(
+                            code=DiagnosticCodes.HMI_TAG_XML_TEMPLATE_MISSING,
+                            severity=DiagnosticSeverity.WARNING,
+                            phase="P30_TAG_TABLES_AND_TAGS",
+                            object_type="tag",
+                            message=(
+                                f"HMI Tag XML 模板缺失，但所有 {len(recheck_required)} 个"
+                                f"变量已存在于 DefaultTagTable 中，跳过导入。"
+                            ),
+                        ))
+                    else:
+                        missing_final = sorted(recheck_required - recheck_existing)
+                        return DeploymentResult(
+                            success=False,
+                            status=DeploymentStatus.FAILED,
+                            plan_id=plan.plan_id,
+                            backend="basic_classic",
+                            diagnostics=diags,
+                            details={
+                                "failed_step": "tags_import",
+                                "reason": "HMI_TAG_XML_TEMPLATE_MISSING",
+                                "missing_tags": missing_final,
+                                "artifact_log": artifact_data,
+                            },
+                        )
+                else:
+                    return DeploymentResult(
+                        success=False,
+                        status=DeploymentStatus.FAILED,
+                        plan_id=plan.plan_id,
+                        backend="basic_classic",
+                        diagnostics=diags,
+                        details={"failed_step": "tags_import", "artifact_log": artifact_data},
+                    )
 
         # ------------------------------------------------------------------
         # Step 2: 重新遍历 DefaultTagTable，确认 required tags 已真实存在

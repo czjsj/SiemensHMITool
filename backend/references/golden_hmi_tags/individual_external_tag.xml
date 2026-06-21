@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Golden Template: Individual External Tag (Connected to PLC)
+
+  PURPOSE:
+    This is a PLACEHOLDER for a real TIA Portal HMI tag that is connected to
+    a PLC variable via an HMI connection. Unlike the internal bool/real
+    templates, this one includes <Address> and <Connection> elements that
+    bind the HMI variable to a PLC address.
+
+  HOW TO REPLACE WITH REAL DATA:
+    1. Open TIA Portal and create a tag in an HMI tag table.
+    2. Set the connection to an existing HMI connection (e.g. "HMI_Connection_1").
+    3. Set the PLC address (e.g. "%DB1.DBX0.0" for a DB bit, "%MW10" for a
+       Merker word, "%I0.0" for an input bit, etc.).
+    4. Export the tag table (right-click -> Export).
+    5. Locate the <Hmi.Tag.Tag> element for the external tag.
+    6. Copy the element structure here, replacing concrete values with
+       {{TAG_NAME}}, {{DATA_TYPE}}, {{ADDRESS}}, {{CONNECTION}},
+       {{COMMENT}}, and {{DEFAULT_TAG_TABLE}} markers.
+
+  PLACEHOLDERS (replaced by HmiTagXmlBuilder at runtime):
+    {{TAG_NAME}}          - Variable name (e.g. "Motor_Start")
+    {{DATA_TYPE}}         - Data type (Bool, Int, DInt, Real, String, etc.)
+    {{ADDRESS}}           - PLC address (e.g. "%DB1.DBX0.0", "%MW10")
+    {{CONNECTION}}        - HMI connection name (e.g. "HMI_Connection_1")
+    {{COMMENT}}           - Variable comment text
+    {{DEFAULT_TAG_TABLE}} - Tag table name (default: "DefaultTagTable")
+
+  ADDRESS FORMAT EXAMPLES:
+    Bool from DB:    %DB1.DBX0.0
+    Int from DB:     %DB1.DBW0
+    Real from DB:    %DB1.DBD0
+    Input bit:       %I0.0
+    Output bit:      %Q0.0
+    Merker word:     %MW10
+
+  NOTE:
+    The element MUST be <Hmi.Tag.Tag>, NOT <SW.Tag>.
+    Using <SW.Tag> with Hmi.Tag.TagComposition.Import will fail.
+-->
+<Engineering version="V16" xmlns="http://www.siemens.com/automation/HmiTagML">
+  <Hmi.Tag.Tag ID="{{TAG_ID}}" CompositionName="Tags" DataType="{{DATA_TYPE}}">
+    <AttributeList>
+      <Name>{{TAG_NAME}}</Name>
+      <!-- External tag: Connection binds to PLC; Address not supported in AttributeList -->
+      <Connection>{{CONNECTION}}</Connection>
+      <DefaultTagTable>{{DEFAULT_TAG_TABLE}}</DefaultTagTable>
+      <Comment>{{COMMENT}}</Comment>
+    </AttributeList>
+  </Hmi.Tag.Tag>
+</Engineering>

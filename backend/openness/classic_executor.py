@@ -912,6 +912,19 @@ class ClassicOpennessExecutor:
             with open(dest_path, "w", encoding="utf-8") as f:
                 f.write(xml_content)
             logger.debug("已保存导入 XML 副本到 %s", dest_path)
+            # 诊断：检测 XML 根元素类型信息
+            try:
+                import xml.etree.ElementTree as ET
+                root = ET.fromstring(xml_content.encode())
+                raw_tag = root.tag
+                detected_xml_class = raw_tag.split("}")[-1] if "}" in raw_tag else raw_tag
+                target_collection_type = "tag_collection" if "Tag" in detected_xml_class else "block_collection" if "Block" in detected_xml_class else "unknown"
+                logger.debug(
+                    "import_failure_copy 诊断: detected_xml_class=%s, target_collection_type=%s",
+                    detected_xml_class, target_collection_type,
+                )
+            except Exception:
+                pass
         except Exception as e:
             logger.debug("保存导入 XML 副本失败: %s", e)
 
@@ -1322,7 +1335,9 @@ class ClassicOpennessExecutor:
     # Step 3: 导入 Tag Table XML 到 DefaultTagTable
     # ------------------------------------------------------------------
 
-    def import_tags_to_default_table(self, hmi_software, tags_xml: str) -> ClassicStepResult:
+    def import_tags_to_default_table(
+        self, hmi_software, tags_xml: str, tag_items: list[dict] | None = None,
+    ) -> ClassicStepResult:
         """导入 HMI Tag XML 到 DefaultTagTable。
 
         官方 API (唯一正确路径):
@@ -1333,12 +1348,64 @@ class ClassicOpennessExecutor:
 
         V5.0: 导入前增加 XML 类型守卫校验，防止 SW.Blocks (PLC Blocks) XML
         错误地传入 HMI TagComposition.Import。增加失败文件保留机制。
+        V5.1: 导入前检查已有变量，若全部已存在则跳过。XML 类别不匹配时
+        不再回退到 create_hmi_tags_via_api。无 golden template 时返回
+        HMI_TAG_XML_TEMPLATE_MISSING。
         """
+        import logging
+        _logger = logging.getLogger(__name__)
+
         result = ClassicStepResult("tags", OpennessOperationKind.TIA_MUTATION)
         if not tags_xml.strip():
+            # V5.1: tags_xml 为空时，检查是否所有变量已存在
+            if tag_items:
+                existing = self.enumerate_existing_hmi_tags(hmi_software)
+                required = {t["name"] for t in tag_items if t.get("name")}
+                if required and required.issubset(existing):
+                    result.success = True
+                    result.api_calls.append(
+                        "all_tags_already_exist (no XML template, "
+                        f"existing={len(existing)}, required={len(required)})"
+                    )
+                    return result
+                missing = sorted(required - existing) if required else []
+                result.diagnostics.append(Diagnostic(
+                    code=DiagnosticCodes.HMI_TAG_XML_TEMPLATE_MISSING,
+                    severity=DiagnosticSeverity.ERROR,
+                    phase="P30_TAG_TABLES_AND_TAGS",
+                    message=(
+                        f"HMI Tag XML 模板缺失，无法导入变量。"
+                        f"缺失变量 {len(missing)} 个: {missing[:5]}"
+                        f"{'...' if len(missing) > 5 else ''}"
+                    ),
+                    details={
+                        "stage": "NO_GOLDEN_TEMPLATE",
+                        "missing_tags": missing,
+                    },
+                    remediation="请提供有效的 HMI Tag XML 模板以导入缺失变量。",
+                ))
+                return result
             result.success = True
             result.api_calls.append("SKIP (no tags)")
             return result
+
+        # V5.1: 检查所有预期变量是否已存在
+        tag_items_names = [t["name"] for t in (tag_items or []) if t.get("name")]
+        if tag_items_names:
+            existing_tags_set = self.enumerate_existing_hmi_tags(hmi_software)
+            missing_names = [n for n in tag_items_names if n not in existing_tags_set]
+            if not missing_names:
+                result.success = True
+                result.api_calls.append(
+                    "all_tags_already_exist "
+                    f"(existing={len(existing_tags_set)}, "
+                    f"expected={len(tag_items_names)})"
+                )
+                return result
+            _logger.info(
+                "import_tags_to_default_table: existing=%d, expected=%d, missing=%d",
+                len(existing_tags_set), len(tag_items_names), len(missing_names),
+            )
 
         temp_path = None
         try:
@@ -1372,7 +1439,16 @@ class ClassicOpennessExecutor:
                         "guard_error": error_msg,
                     },
                 ))
+                # V5.1: XML 类别不匹配时不再回退到 Create API
                 return result
+
+            # 调试：记录导入 XML 前 20 行
+            try:
+                with open(temp_path, 'r', encoding='utf-8') as f:
+                    first_lines = ''.join(f.readlines()[:20])
+                logging.getLogger(__name__).debug("Import XML first 20 lines:\n%s", first_lines)
+            except Exception:
+                pass
 
             import_opts = self._make_import_options()
             file_info = self._make_file_info(temp_path)
@@ -1451,6 +1527,29 @@ class ClassicOpennessExecutor:
             result.success = True
 
         except Exception as e:
+            exc_msg = str(e)
+            # V5.0: 快速检测 XML class 不匹配错误
+            if "Class of the" in exc_msg and "is not supported" in exc_msg:
+                logging.getLogger(__name__).error(
+                    "XML Class 不匹配: %s", exc_msg
+                )
+                result.diagnostics.append(Diagnostic(
+                    code=DiagnosticCodes.TAG_XML_WRONG_CLASS,
+                    severity=DiagnosticSeverity.ERROR,
+                    phase="P30_TAG_TABLES_AND_TAGS",
+                    message=(
+                        "HMI 变量同步失败：TIA Portal 报告 XML 文档的 Class 类型"
+                        "与导入目标不匹配 ('Class of the ... is not supported')。"
+                        f"错误: {exc_msg}"
+                    ),
+                    details={
+                        "stage": "IMPORT_CLASS_MISMATCH",
+                        "xml_path": temp_path,
+                        "exception_chain": collect_exception_chain(e),
+                    },
+                ))
+                # V5.1: XML Class 不匹配时不再回退到 Create API
+                return result
             result.diagnostics.append(Diagnostic(
                 code=DiagnosticCodes.IMPORT_TIA_EXCEPTION,
                 severity=DiagnosticSeverity.ERROR,
@@ -1709,6 +1808,206 @@ class ClassicOpennessExecutor:
         return result
 
     # ------------------------------------------------------------------
+    # V5.1: enumerate_existing_hmi_tags — 枚举已有 HMI 变量
+    # ------------------------------------------------------------------
+
+    def enumerate_existing_hmi_tags(self, hmi_software) -> set[str]:
+        """获取 HMI DefaultTagTable 中已有的所有变量名。
+
+        流程:
+          1. 获取 hmiSoftware.TagFolder.DefaultTagTable
+          2. 遍历 DefaultTagTable.Tags
+          3. 收集所有变量名到 set 中
+
+        任何步骤失败时返回空集并记录 WARNING 日志。
+
+        参数:
+            hmi_software: HMI 软件对象。
+
+        返回:
+            set[str]，已有的变量名集合；失败时返回空集。
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        try:
+            tag_folder = hmi_software.TagFolder
+            default_table = tag_folder.DefaultTagTable
+            if default_table is None:
+                logger.warning(
+                    "enumerate_existing_hmi_tags: DefaultTagTable is None"
+                )
+                return set()
+            tags = default_table.Tags
+            names: set[str] = set()
+            for tag in tags:
+                try:
+                    names.add(str(tag.Name))
+                except Exception:
+                    pass
+            return names
+        except Exception as exc:
+            logger.warning(
+                "enumerate_existing_hmi_tags failed: %s", exc
+            )
+            return set()
+
+    # ------------------------------------------------------------------
+    # V5.0: create_hmi_tags_via_api — 通过 Create 方法逐变量创建
+    # (EXPERIMENTAL — 不在主流程中调用，仅供高级用例手动使用)
+    # ------------------------------------------------------------------
+
+    def create_hmi_tags_via_api(
+        self,
+        hmi_software,
+        tag_items: list[dict],
+    ) -> ClassicStepResult:
+        """[EXPERIMENTAL] 通过 DefaultTagTable.Tags.Create 方法逐变量创建 HMI Tags。
+
+        ⚠ 实验性方法 — 不在主流程中调用，仅供高级用例手动使用。
+        主流程应通过 import_hmi_tags_safe / import_tags_to_default_table
+        的 XML Import 路径导入变量。
+
+        非 XML 路径: 不依赖 XML Import，直接通过 TIA API Create 方法
+        创建变量。需要 TagComposition 支持 Create 方法。
+
+        流程:
+          1. 获取 hmiSoftware.TagFolder.DefaultTagTable.Tags (TagComposition)。
+          2. 通过反射 (has_method) 检查 Create 方法是否存在。
+          3. 如果 Create 存在，遍历 tag_items，逐个调用 Create(Name, DataType)，
+             可选设置 Connection 和 Address。
+          4. 如果 Create 不存在，返回 TAG_CREATE_NOT_SUPPORTED 诊断。
+
+        参数:
+            hmi_software: HMI 软件对象。
+            tag_items: [{"name": "CMD_Start", "data_type": "Bool",
+                         "connection": "", "address": ""}, ...]
+
+        返回:
+            ClassicStepResult，包含 objects_created 计数。
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        result = ClassicStepResult("tags", OpennessOperationKind.TIA_MUTATION)
+
+        if not tag_items:
+            result.success = True
+            result.api_calls.append("CREATE_API_SKIP (no tags)")
+            return result
+
+        try:
+            # Step 1: 获取 DefaultTagTable.Tags 容器
+            tag_folder = hmi_software.TagFolder
+            default_table = tag_folder.DefaultTagTable
+            if default_table is None:
+                raise RuntimeError(
+                    "DEFAULT_TAG_TABLE_NOT_FOUND: 目标 HMI 中未找到默认变量表"
+                )
+            tags_collection = default_table.Tags
+
+            # Step 2: 反射确认 Create 方法可用
+            from backend.openness.reflection_utils import has_method, describe_dotnet_methods
+            if not has_method(tags_collection, "Create"):
+                dotnet_info = describe_dotnet_methods(tags_collection)
+                tag_names = [t.get("name", "") for t in tag_items if t.get("name")]
+                result.diagnostics.append(Diagnostic(
+                    code=DiagnosticCodes.TAG_CREATE_NOT_SUPPORTED,
+                    severity=DiagnosticSeverity.ERROR,
+                    phase="P30_TAG_TABLES_AND_TAGS",
+                    message=(
+                        f"TagComposition (type={dotnet_info.get('dotnet_type', 'Unknown')}) "
+                        f"不支持 Create 方法，无法通过 API 路径逐变量创建。"
+                        f"预期导入变量 {len(tag_names)} 个: {tag_names}"
+                    ),
+                    details=dotnet_info,
+                    remediation=(
+                        "TagComposition 不支持 Create，请使用 XML Import 方式导入变量。"
+                    ),
+                ))
+                return result
+
+            # Step 3: 遍历 tag_items，逐个 Create
+            existing_names: set[str] = set()
+            try:
+                for tag in tags_collection:
+                    try:
+                        existing_names.add(str(getattr(tag, "Name", "")))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            logger.info(
+                "create_hmi_tags_via_api: existing=%d, incoming=%d",
+                len(existing_names), len(tag_items),
+            )
+
+            created_count = 0
+            for item in tag_items:
+                name = str(item.get("name", "")).strip()
+                if not name:
+                    continue
+
+                data_type = str(item.get("data_type", "Bool")).strip()
+
+                if name in existing_names:
+                    result.api_calls.append(f"CREATE_API_SKIP (exists): {name}")
+                    continue
+
+                try:
+                    new_tag = tags_collection.Create(name, data_type)
+                    created_count += 1
+
+                    # 设置连接（如有）
+                    conn = str(item.get("connection", "")).strip()
+                    if conn:
+                        try:
+                            new_tag.Connection = conn
+                        except Exception:
+                            pass
+
+                    # 设置地址（如有）
+                    addr = str(item.get("address", "")).strip()
+                    if addr:
+                        try:
+                            new_tag.Address = addr
+                        except Exception:
+                            pass
+
+                    result.api_calls.append(f"CREATE_API: {name} ({data_type})")
+
+                except Exception as exc:
+                    result.diagnostics.append(Diagnostic(
+                        code=DiagnosticCodes.IMPORT_TIA_EXCEPTION,
+                        severity=DiagnosticSeverity.ERROR,
+                        phase="P30_TAG_TABLES_AND_TAGS",
+                        object_name=name,
+                        message=f"API Create 变量 '{name}' 失败: {exc}",
+                        details={
+                            "stage": "CREATE_API_TAG",
+                            "exception_chain": collect_exception_chain(exc),
+                        },
+                    ))
+
+            result.objects_created = created_count
+            result.success = created_count > 0
+
+        except Exception as exc:
+            result.diagnostics.append(Diagnostic(
+                code=DiagnosticCodes.IMPORT_TIA_EXCEPTION,
+                severity=DiagnosticSeverity.ERROR,
+                phase="P30_TAG_TABLES_AND_TAGS",
+                message=f"create_hmi_tags_via_api 异常: {exc}",
+                details={
+                    "stage": "CREATE_API",
+                    "exception_chain": collect_exception_chain(exc),
+                    "hmi_target_type": describe_dotnet_object(hmi_software),
+                },
+            ))
+
+        return result
+
+    # ------------------------------------------------------------------
     # V4.2: import_hmi_tags_safe — XML Import 主路径（无 UPSERT 回退）
     # ------------------------------------------------------------------
 
@@ -1742,11 +2041,56 @@ class ClassicOpennessExecutor:
         result = ClassicStepResult("tags", OpennessOperationKind.TIA_MUTATION)
 
         if not tags_xml or not tags_xml.strip():
+            # V5.1: 当 tags_xml 为空时，检查是否所有变量已存在
+            if tag_items:
+                existing = self.enumerate_existing_hmi_tags(hmi_software)
+                required = {t["name"] for t in tag_items if t.get("name")}
+                if required and required.issubset(existing):
+                    result.success = True
+                    result.api_calls.append(
+                        "all_tags_already_exist (no XML template, "
+                        f"existing={len(existing)}, required={len(required)})"
+                    )
+                    return result
+                # V5.1: 无 golden template 且存在缺失变量
+                missing = sorted(required - existing) if required else []
+                result.diagnostics.append(Diagnostic(
+                    code=DiagnosticCodes.HMI_TAG_XML_TEMPLATE_MISSING,
+                    severity=DiagnosticSeverity.ERROR,
+                    phase="P30_TAG_TABLES_AND_TAGS",
+                    message=(
+                        f"HMI Tag XML 模板缺失，无法导入变量。"
+                        f"缺失变量 {len(missing)} 个: {missing[:5]}"
+                        f"{'...' if len(missing) > 5 else ''}"
+                    ),
+                    details={
+                        "stage": "NO_GOLDEN_TEMPLATE",
+                        "missing_tags": missing,
+                    },
+                    remediation="请提供有效的 HMI Tag XML 模板以导入缺失变量。",
+                ))
+                return result
             result.success = True
             result.api_calls.append("SKIP (no tags)")
             return result
 
         expected_names = [t["name"] for t in (tag_items or []) if t.get("name")]
+
+        # V5.1: 检查所有预期变量是否已存在
+        if expected_names:
+            existing_tags = self.enumerate_existing_hmi_tags(hmi_software)
+            missing_names = [n for n in expected_names if n not in existing_tags]
+            if not missing_names:
+                result.success = True
+                result.api_calls.append(
+                    "all_tags_already_exist "
+                    f"(existing={len(existing_tags)}, expected={len(expected_names)})"
+                )
+                return result
+            logger.info(
+                "import_hmi_tags_safe: existing=%d, expected=%d, missing=%d",
+                len(existing_tags), len(expected_names), len(missing_names),
+            )
 
         # Step 1: 获取 DefaultTagTable.Tags 容器
         try:
@@ -1790,6 +2134,28 @@ class ClassicOpennessExecutor:
         # Step 3: 写入临时 XML
         temp_path = self._write_temp_xml(tags_xml, "tags_safe")
         result.temp_files.append(temp_path)
+
+        # V5.0: XML 类型守卫校验 — 在调用 Import 之前
+        from backend.xml_validator import validate_xml_class_for_import_target
+        try:
+            validate_xml_class_for_import_target(temp_path, "hmi_tags")
+        except ValueError as guard_err:
+            error_msg = str(guard_err)
+            logger.error("XML 类型守卫拦截: %s", error_msg)
+            result.diagnostics.append(Diagnostic(
+                code=DiagnosticCodes.TAG_XML_WRONG_CLASS,
+                severity=DiagnosticSeverity.ERROR,
+                phase="P30_TAG_TABLES_AND_TAGS",
+                message=f"HMI variable sync failed: {error_msg}",
+                details={
+                    "stage": "PRE_IMPORT_XML_TYPE_GUARD",
+                    "xml_path": temp_path,
+                    "guard_error": error_msg,
+                },
+            ))
+            # V5.1: XML 类别不匹配时不再回退到 Create API
+            return result
+
         file_info = self._make_file_info(temp_path)
 
         # Step 4: 导入前枚举
@@ -1857,9 +2223,40 @@ class ClassicOpennessExecutor:
                 )
             except Exception as exc:
                 logger.error("XML Import (all methods) failed: %s", exc)
-                exc_msg = str(exc).lower()
-                # V5.0: 检测 SW.Blocks 类型不匹配错误
-                if "sw.blocks" in exc_msg or "simens.engineering.sw.blocks" in exc_msg:
+                # V5.0: 快速检测 XML class 不匹配错误（不尝试更多 Import 重载）
+                raw_exc = str(exc)
+                if "Class of the" in raw_exc and "is not supported" in raw_exc:
+                    logger.error("XML Class 不匹配: %s", raw_exc)
+                    result.diagnostics.append(Diagnostic(
+                        code=DiagnosticCodes.TAG_XML_WRONG_CLASS,
+                        severity=DiagnosticSeverity.ERROR,
+                        phase="P30_TAG_TABLES_AND_TAGS",
+                        message=(
+                            "HMI 变量同步失败：TIA Portal 报告 XML 文档的 Class 类型"
+                            "与导入目标不匹配 ('Class of the ... is not supported')。"
+                            f"错误: {raw_exc}"
+                        ),
+                        details={
+                            "stage": "IMPORT_CLASS_MISMATCH",
+                            "exception_chain": collect_exception_chain(exc),
+                        },
+                    ))
+                    # V5.1: XML Class 不匹配时不再回退到 Create API
+                    return result
+                exc_msg = raw_exc.lower()
+                # V5.0: 检测 SW.Blocks / SW.Tag 类型不匹配错误
+                sw_tag = any(x in exc_msg for x in ["sw.tag", "engineering.sw.tag", "simens.engineering.sw.tag"])
+                sw_blocks = any(x in exc_msg for x in ["sw.blocks", "simens.engineering.sw.blocks"])
+                if sw_tag:
+                    diag_code = DiagnosticCodes.TAG_XML_WRONG_CLASS
+                    diag_msg = (
+                        "HMI 变量同步失败：当前导入目标是 HMI 标签集合 TagComposition.Import，"
+                        "但生成的 XML 是 PLC Software Tag 类型 (Siemens.Engineering.SW.Tag)。"
+                        "HMI Tag XML 不能使用 PLC Tag XML 格式。"
+                        "请检查 HMI Tag XML 生成器，不能把 PLC tag XML 导入 HMI tag 集合。"
+                        f"错误: {exc}"
+                    )
+                elif sw_blocks:
                     diag_code = DiagnosticCodes.TAG_XML_WRONG_CLASS
                     diag_msg = (
                         f"HMI 变量同步失败：导入目标是 HMI 标签集合 (TagComposition)，"
@@ -1883,6 +2280,7 @@ class ClassicOpennessExecutor:
                         "expected_tags": expected_names,
                     },
                 ))
+                # V5.1: TAG_XML_WRONG_CLASS 时不再回退到 Create API
                 return result
 
         # Step 6: ImportOptions 不可用 → 尝试单参数 Import(FileInfo)

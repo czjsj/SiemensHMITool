@@ -152,6 +152,8 @@ class DiagnosticCodes:
     HMI_FAMILY_UNKNOWN = "HMI_FAMILY_UNKNOWN"
     # V4.2 新增: .NET 反射 — Create 方法缺失
     TAG_CREATE_METHOD_NOT_FOUND = "TAG_CREATE_METHOD_NOT_FOUND"
+    # V5.0 新增: TagComposition 不支持 Create (API 路径)
+    TAG_CREATE_NOT_SUPPORTED = "TAG_CREATE_NOT_SUPPORTED"
     # V4.2 新增: Classic XML 导入目标不可用
     CLASSIC_TAG_IMPORT_TARGET_NOT_FOUND = "CLASSIC_TAG_IMPORT_TARGET_NOT_FOUND"
     # V4.2 新增: Unified Tags 无 Create 方法
@@ -165,3 +167,5 @@ class DiagnosticCodes:
     # V5.0 新增: XML 类别与导入目标不匹配
     TAG_XML_WRONG_CLASS = "TAG_XML_WRONG_CLASS"
     TAG_IMPORT_TARGET_MISMATCH = "TAG_IMPORT_TARGET_MISMATCH"
+    # V5.1 新增: HMI Tag XML 模板缺失（无 golden template 可用）
+    HMI_TAG_XML_TEMPLATE_MISSING = "HMI_TAG_XML_TEMPLATE_MISSING"
