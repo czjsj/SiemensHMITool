@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from backend.backends.classic.tag_xml_builder import TagXmlBuilder, HmiTagXmlBuilder
@@ -639,8 +640,34 @@ class TestHmiTagXmlBuilderOutputFormat(unittest.TestCase):
         ]
         xml = builder.build_batch_tags_xml(tag_items)
         self.assertIn("PLC_1", xml, "Should contain connection")
+
+    def test_no_datatype_in_xml(self):
+        """V5.5R8: DataType 不在 XML 的任何位置。
+
+        TIA Portal Hmi.Tag.TagComposition.Import:
+        - 不接受 <DataType> 子元素 ("The type of the argument 'DataType' is invalid")
+        - 不读取元素属性 DataType="..."（默认全部 Int）
+        - 类型由 _correct_tag_data_types_after_import 通过 .NET API 修正
+        """
+        builder = HmiTagXmlBuilder()
+        xml = builder.build_batch_tags_xml([
+            {"name": "BTN_Test", "data_type": "Bool"},
+            {"name": "IO_Test", "data_type": "Real"},
+        ])
+        root = ET.fromstring(xml)
+        ns = "http://www.siemens.com/automation/HmiTagML"
+        for tag_elem in root.findall(f".//{{{ns}}}Hmi.Tag.Tag"):
+            self.assertNotIn("DataType", tag_elem.attrib,
+                           "<Hmi.Tag.Tag> 不得有 DataType 属性")
+            attr_list = tag_elem.find(f"{{{ns}}}AttributeList")
+            self.assertIsNotNone(attr_list,
+                               f"<Hmi.Tag.Tag> 必须包含 <AttributeList>")
+            dt_elem = attr_list.find(f"{{{ns}}}DataType")
+            self.assertIsNone(dt_elem,
+                            f"<AttributeList> 内不得有 <DataType> 子元素")
         self.assertIn("Hmi.Tag.Tag", xml, "Should contain Hmi.Tag.Tag")
-        self.assertNotIn("<Address>", xml, "Address element not supported in Hmi.Tag.Tag")
+        self.assertNotIn("<Address>", xml, "Address not supported")
+        self.assertNotIn("<DataType>", xml, "DataType not in XML at all")
 
 
 class TestDetectHmiTagXmlKind(unittest.TestCase):

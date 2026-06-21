@@ -200,7 +200,11 @@ def _classify_control(name: str, node: ET.Element) -> ItemKind:
 
 
 def _extract_tag_references(node: ET.Element) -> list[TagReference]:
-    """从控件节点提取所有变量引用。"""
+    """从控件节点提取所有变量引用。
+
+    V5.5: 扩展覆盖 LinkList/OpenLink 结构，检测 FunctionList 参数和
+    Dynamic Binding (TagElementTrigger) 中的变量引用。
+    """
     refs: list[TagReference] = []
 
     # ProcessTag / ProcessValue
@@ -232,7 +236,81 @@ def _extract_tag_references(node: ET.Element) -> list[TagReference]:
                     location="dynamization",
                 ))
 
+    # V5.5: LinkList/OpenLink 结构 — FunctionList 参数和 Dynamic Binding
+    # 模式1: <Value TargetID="@OpenLink"><Name>变量名</Name></Value>
+    # 模式2: <Tag TargetID="@OpenLink"><Name>变量名</Name></Tag>
+    # 这些出现在 FunctionListEntryParameter/LinkList 和
+    # TagElementTrigger/LinkList 中。
+    for child in node.iter():
+        child_local = local_name(child.tag)
+        if child_local not in ("Value", "Tag", "LinkList"):
+            continue
+        # 检查 TargetID="@OpenLink"
+        target_id = child.get("TargetID", "")
+        if target_id == "@OpenLink":
+            for name_elem in child:
+                if local_name(name_elem.tag) == "Name" and name_elem.text and name_elem.text.strip():
+                    # 判断上下文: properties vs events vs dynamizations
+                    location = _classify_openlink_context(child)
+                    refs.append(TagReference(
+                        tag_name=name_elem.text.strip(),
+                        location=location,
+                    ))
+
     return refs
+
+
+def _classify_openlink_context(elem: ET.Element) -> str:
+    """推断 OpenLink 变量引用的上下文类型。
+
+    从 elem 向上遍历，查找最近的祖先控件类型或结构类型。
+    """
+    # 简单的基于 tag 名称判断: 向上找 FunctionListEntry / Event / TagElementTrigger
+    current = elem
+    # 收集从当前元素向上的标签名（忽略 LinkList/Value/Tag）
+    context_tags: list[str] = []
+    # 遍历父节点（使用 elem 树位置推断）
+    # ET 没有 getparent，使用路径推断
+    for ancestor in _iter_ancestors(current):
+        anc_local = local_name(ancestor.tag)
+        if anc_local in ("FunctionListEntry", "FunctionListEntryParameter"):
+            return "event"
+        if anc_local in ("TagElementTrigger", "RangeAppearanceAnimation",
+                         "FlashAnimation", "Animations", "DynamicBindings"):
+            return "dynamization"
+        if anc_local == "ProcessTag":
+            return "property"
+    return "unknown"
+
+
+def _iter_ancestors(node: ET.Element):
+    """查找 XML 树中 node 的所有祖先元素。
+
+    ET 没有 getparent() 方法，使用 root.iter() 构建父子映射。
+    """
+    # 找到 root
+    root = node
+    while True:
+        parent_found = False
+        for p in root.iter():
+            for child in p:
+                if child is root:
+                    root = p
+                    parent_found = True
+                    break
+            if parent_found:
+                break
+        if not parent_found:
+            break
+    # root 现在是真正的根元素
+    parent_map = {child: parent for parent in root.iter() for child in parent}
+    current = node
+    while True:
+        parent = parent_map.get(current)
+        if parent is None:
+            break
+        yield parent
+        current = parent
 
 
 def _infer_button_behavior(events: list[EventPattern], node: ET.Element) -> str | None:

@@ -21,7 +21,8 @@ class ClassicCommon:
     """Basic 和 Comfort 共享的 Classic XML 生成基础设施。"""
 
     # 模板变量名 — 在 catalog manifest 中记录
-    TEMPLATE_TAG_NAMES: set[str] = {"Button", "Template_ProcessTag", "Template_TextList"}
+    # V5.5: "Light" added — indicator Circle's TagElementTrigger variable in Comfort template
+    TEMPLATE_TAG_NAMES: set[str] = {"Button", "Light", "Template_ProcessTag", "Template_TextList"}
 
     def __init__(self, target_family: str = "comfort"):
         self.target_family = target_family
@@ -35,13 +36,26 @@ class ClassicCommon:
         self._allow_vbs = target_family == "comfort"
 
         # V3.2: 画面引用重写器
+        # V5.5: copy TEMPLATE_TAG_NAMES so instance-level additions don't affect class default
+        self._template_tag_names = set(self.TEMPLATE_TAG_NAMES)
         self.screen_reference_rewriter = ClassicScreenReferenceRewriter(
-            template_tag_names=self.TEMPLATE_TAG_NAMES,
+            template_tag_names=self._template_tag_names,
         )
 
     @property
     def allow_vbs(self) -> bool:
         return self._allow_vbs
+
+    def add_template_tag_names(self, *names: str):
+        """V5.5: 向模板变量名集合动态添加名称。
+
+        应在分析模板 XML 后调用，将模板中实际使用的所有变量名注册进来，
+        确保 ClassicScreenReferenceRewriter 能够检测并重写它们。
+        """
+        self._template_tag_names.update(names)
+        self.screen_reference_rewriter = ClassicScreenReferenceRewriter(
+            template_tag_names=self._template_tag_names,
+        )
 
     # ------------------------------------------------------------------
     # Tags

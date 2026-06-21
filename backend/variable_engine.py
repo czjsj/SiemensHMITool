@@ -71,6 +71,43 @@ DEFAULT_DATA_TYPES = {
     "String": "String",
 }
 
+
+def normalize_data_type(value: str | None, fallback: str = "Int") -> str:
+    """将用户输入的类型字符串归一化为 TIA Portal 标准类型名。
+
+    支持缩写、别名、常见拼写变体。
+    """
+    if not value:
+        return fallback
+
+    key = str(value).strip().lower()
+
+    mapping = {
+        "bool": "Bool",
+        "boolean": "Bool",
+        "bit": "Bool",
+
+        "int": "Int",
+        "integer": "Int",
+        "short": "Int",
+
+        "dint": "DInt",
+        "doubleint": "DInt",
+
+        "real": "Real",
+        "float": "Real",
+        "double": "Real",
+
+        "string": "String",
+        "str": "String",
+        "char": "Char",
+
+        "word": "Word",
+        "dword": "DWord"
+    }
+
+    return mapping.get(key, fallback)
+
 # ---------------------------------------------------------------------------
 # VBS 脚本模板（仅用于 backward-compat generate()）
 # ---------------------------------------------------------------------------
@@ -305,6 +342,21 @@ class VariableEngine:
                         })
                         existing_tags[tag.name] = new_tags_for_legacy[-1]
 
+        # V5.5: 将 enrich 阶段修正后的 data_type 同步回 legacy IR
+        # enrich() 在 _enrich_button/_enrich_indicator/_enrich_iofield 中
+        # 会把已存在 tag 的错误类型（如 Int）强制修正为 Bool/Real，
+        # 但 generate() 的回填循环只添加新 tag，不更新已有 tag 的 data_type。
+        # 此处将 project.tags 中的正确 data_type 写回 ir["tags"]。
+        _project_tag_types: Dict[str, str] = {}
+        for t in project.tags:
+            if t.name and t.data_type:
+                _project_tag_types[t.name] = t.data_type
+        for legacy_tag in ir.get("tags", []):
+            name = (legacy_tag.get("name") or "").strip()
+            corrected = _project_tag_types.get(name)
+            if corrected and legacy_tag.get("data_type") != corrected:
+                legacy_tag["data_type"] = corrected
+
         # 合并 tags
         if new_tags_for_legacy:
             merged_tags: Dict[str, dict] = {}
@@ -367,6 +419,62 @@ class VariableEngine:
                     return action.tag.strip()
         return None
 
+    def infer_tag_data_type_for_item(self, item: ScreenItemSpec) -> str:
+        """根据控件类型和显式配置推断数据类型。
+
+        按钮/开关 → Bool
+        指示灯 → Bool（除非显式指定数值类型）
+        SymbolicIO → Int
+        IOField → 根据显式 data_type 或文本语义推断
+        """
+        from backend.domain.enums import ScreenItemType as SIT
+
+        otype = item.type
+
+        # 按钮、开关、位操作目标必须是 Bool
+        if otype in {SIT.BUTTON}:
+            return "Bool"
+
+        # 指示灯默认 Bool
+        if otype in {SIT.INDICATOR}:
+            explicit = item.properties.get("data_type") or item.properties.get("datatype")
+            if explicit:
+                return normalize_data_type(explicit)
+            return "Bool"
+
+        # SymbolicIO 一般使用 Int 作为文本列表索引
+        if otype in {SIT.SYMBOLIC_IO_FIELD}:
+            return "Int"
+
+        # IOField 根据显式类型或文本语义推断
+        if otype in {SIT.IO_FIELD}:
+            # 检查 properties 中的显式 data_type
+            explicit = item.properties.get("data_type") or item.properties.get("datatype")
+
+            # 也检查 metadata 中的 data_type
+            if not explicit:
+                explicit = item.metadata.get("data_type") or item.metadata.get("datatype")
+
+            if explicit:
+                return normalize_data_type(explicit)
+
+            # 文本语义推断
+            text = item.text.get("zh-CN", "") if item.text else ""
+            text_lower = text.lower()
+            real_keywords = ["温度", "压力", "速度", "流量", "液位", "设定", "频率", "电流", "电压",
+                           "temp", "pressure", "speed", "flow", "level", "setpoint", "frequency",
+                           "current", "voltage", "power", "energy", "weight", "length", "ratio"]
+            if any(k in text_lower for k in real_keywords):
+                return "Real"
+
+            return "Int"
+
+        # 默认兜底
+        explicit = item.properties.get("data_type") or item.properties.get("datatype")
+        if not explicit:
+            explicit = item.metadata.get("data_type") or item.metadata.get("datatype")
+        return normalize_data_type(explicit) if explicit else "Int"
+
     def _make_tag_spec(self, name: str, data_type: str, oid: str,
                        existing_tags: dict, new_tags: list):
         """创建 TagSpec（如果名称不重复）。"""
@@ -403,6 +511,17 @@ class VariableEngine:
                 if ts:
                     new_tags.append(ts)
                     existing_tags[existing_tag] = ts
+            else:
+                # V5.5: 已有 tag 但 data_type 可能为 Int 等非 Bool 值，强制修正
+                existing = existing_tags.get(existing_tag)
+                if existing and getattr(existing, 'data_type', '') != "Bool":
+                    try:
+                        if isinstance(existing, dict):
+                            existing["data_type"] = "Bool"
+                        elif hasattr(existing, 'data_type'):
+                            existing.data_type = "Bool"
+                    except Exception:
+                        pass
             return
 
         is_toggle = self._detect_toggle_from_item(item, oid)
@@ -440,6 +559,18 @@ class VariableEngine:
             )
             new_tags.append(ts)
             existing_tags[tag_name] = ts
+        else:
+            # V5.5: 已有 tag 但 data_type 可能为 Int 等非 Bool 值，强制修正
+            existing = existing_tags.get(tag_name)
+            if existing and getattr(existing, 'data_type', '') != "Bool":
+                try:
+                    from backend.domain.ir_v2 import TagSpec as _TS
+                    if isinstance(existing, dict):
+                        existing["data_type"] = "Bool"
+                    elif hasattr(existing, 'data_type'):
+                        existing.data_type = "Bool"
+                except Exception:
+                    pass
 
         # 语义事件和动作（不生成 VBS）
         if not item.events:  # 只在无已有事件时自动生成
@@ -495,6 +626,17 @@ class VariableEngine:
                 if ts:
                     new_tags.append(ts)
                     existing_tags[existing_tag] = ts
+            else:
+                # V5.5: 已有 tag 但 data_type 可能为 Int 等非 Bool 值，强制修正
+                existing = existing_tags.get(existing_tag)
+                if existing and getattr(existing, 'data_type', '') != "Bool":
+                    try:
+                        if isinstance(existing, dict):
+                            existing["data_type"] = "Bool"
+                        elif hasattr(existing, 'data_type'):
+                            existing.data_type = "Bool"
+                    except Exception:
+                        pass
             return
 
         is_alarm = self._detect_alarm_from_item(item, oid)
@@ -530,6 +672,17 @@ class VariableEngine:
             )
             new_tags.append(ts)
             existing_tags[tag_name] = ts
+        else:
+            # V5.5: 已有 tag 但 data_type 可能为 Int 等非 Bool 值，强制修正
+            existing = existing_tags.get(tag_name)
+            if existing and getattr(existing, 'data_type', '') != "Bool":
+                try:
+                    if isinstance(existing, dict):
+                        existing["data_type"] = "Bool"
+                    elif hasattr(existing, 'data_type'):
+                        existing.data_type = "Bool"
+                except Exception:
+                    pass
 
         # 颜色动态绑定（离散）
         blink = bool(item.properties.get("blink", False))
@@ -571,10 +724,25 @@ class VariableEngine:
         if existing_tag:
             item.tag_binding = existing_tag
             if existing_tag not in existing_tags:
-                ts = self._make_tag_spec(existing_tag, "Real", oid, existing_tags, new_tags)
+                inferred_type = self.infer_tag_data_type_for_item(item)
+                ts = self._make_tag_spec(existing_tag, inferred_type, oid, existing_tags, new_tags)
                 if ts:
                     new_tags.append(ts)
                     existing_tags[existing_tag] = ts
+            else:
+                # V5.5R3: 已有 tag 但 data_type 可能为 Int 等非推断类型，强制修正
+                existing = existing_tags.get(existing_tag)
+                inferred_type = self.infer_tag_data_type_for_item(item)
+                if existing and inferred_type:
+                    current_type = getattr(existing, 'data_type', '')
+                    if current_type != inferred_type:
+                        try:
+                            if isinstance(existing, dict):
+                                existing["data_type"] = inferred_type
+                            elif hasattr(existing, 'data_type'):
+                                existing.data_type = inferred_type
+                        except Exception:
+                            pass
             return
 
         tag_name = self._make_tag_name(oid, IOFIELD_PREFIX, existing_tags)

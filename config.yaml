@@ -31,7 +31,8 @@ openness:
   classic_template:
     enabled: true
     template_screen_name: 画面_1
-    template_xml_path: C:\Users\sunny\Desktop\SiemensHmi_Assistant\SiemensHmi_Assistant_V2.3\SiemensHmi_Assistant_V2.3\SiemensHmi_Assistant\exports/templates\画面_1_template.xml
+    template_xml_path: C:\Users\sunny\Desktop\SiemensHmi_Assistant\SiemensHmi_Assistant_副本\SiemensHmi_Assistant\exports/templates\画面_1_template.xml
+    tag_template_xml_path: ''
     template_export_dir: exports/templates
     generated_xml_dir: exports/generated_from_template
     import_option: Override
@@ -76,7 +77,7 @@ output:
   export_dir: exports
   encoding: utf-8-sig
   reference_xml: "\uFEFF<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Document>\n \
-    \ <Engineering version=\"V16\" />\n  <DocumentInfo>\n    <Created>2026-06-21T08:07:27.4088094Z</Created>\n\
+    \ <Engineering version=\"V16\" />\n  <DocumentInfo>\n    <Created>2026-06-21T16:52:01.9251713Z</Created>\n\
     \    <ExportSetting>WithDefaults</ExportSetting>\n    <InstalledProducts>\n  \
     \    <Product>\n        <DisplayName>Totally Integrated Automation Portal</DisplayName>\n\
     \        <DisplayVersion>V16 Update 8</DisplayVersion>\n      </Product>\n   \

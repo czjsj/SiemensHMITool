@@ -275,7 +275,8 @@ class TestUpsertTagsToDefaultTable:
 
         assert result.objects_created == 1
         assert result.success is True
-        mock_tags_coll.Create.assert_called_once_with("NewTag", "Bool")
+        # V5.5R10: Create(name) single-arg; DataType set via Reflection post-creation
+        mock_tags_coll.Create.assert_called_once_with("NewTag")
 
     def test_upsert_skips_existing_matching_tags(self):
         """已存在且匹配的标签应被跳过。"""

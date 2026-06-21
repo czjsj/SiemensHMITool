@@ -129,6 +129,8 @@ def replace_all_tag_references(
     - Dynamizations 中的 TagName
     - Animations 中的 TagName
     - 脚本中的变量名（安全替换）
+    - V5.5: LinkList/OpenLink 内部的 <Name> 元素
+      （FunctionListEntryParameter 和 TagElementTrigger 中的变量引用）
 
     返回: 实际替换的次数。
     """
@@ -136,6 +138,8 @@ def replace_all_tag_references(
     tag_props = {
         "tagname", "variablename", "processtag", "processvalue",
         "hmitag", "variable", "expression",
+        # V5.5: extended coverage for FunctionList parameters
+        "tag", "connectiontag", "valuetag",
     }
 
     for elem in node.iter():
@@ -156,11 +160,41 @@ def replace_all_tag_references(
                     elem.attrib[attr_name] = new_tag
                     replaced_count += 1
 
+        # V5.5: Handle Name="TagName" / Name="ProcessTag" / Name="VariableName" parameter structures
+        param_name = elem.get("Name") or elem.get("name") or ""
+        param_name_lower = param_name.lower()
+        if param_name_lower in {
+            "tag", "tagname", "processtag", "variable", "variablename",
+            "connectiontag", "valuetag",
+        }:
+            if elem.text and elem.text.strip():
+                old_text = elem.text.strip()
+                if old_text in old_tags:
+                    elem.text = new_tag
+                    replaced_count += 1
+
+        # V5.5: LinkList/OpenLink 内部 <Name> 子元素替换
+        # 模式: <Value TargetID="@OpenLink"><Name>Button</Name></Value>
+        #        <Tag TargetID="@OpenLink"><Name>Light</Name></Tag>
+        if elem_local in {"value", "tag"}:
+            target_id = elem.get("TargetID", "")
+            if target_id == "@OpenLink":
+                for name_elem in elem:
+                    if local_name(name_elem.tag).lower() == "name":
+                        if name_elem.text and name_elem.text.strip():
+                            old_text = name_elem.text.strip()
+                            if old_text in old_tags:
+                                name_elem.text = new_tag
+                                replaced_count += 1
+
     return replaced_count
 
 
 def ensure_no_placeholder_tags(node: ET.Element, placeholder_tags: list[str]) -> list[str]:
     """检查是否残留模板变量。
+
+    V5.5: 扩展覆盖 OpenLink 内部 <Name> 元素，检测 FunctionList 和
+    Dynamic Binding 中的残留模板变量。
 
     返回: 残留的模板变量名列表（空列表表示无残留）。
     """
@@ -183,7 +217,46 @@ def ensure_no_placeholder_tags(node: ET.Element, placeholder_tags: list[str]) ->
                 if val in placeholder_tags:
                     remaining.append(val)
 
+        # V5.5: OpenLink <Name> 子元素 — Value/Tag @TargetID="@OpenLink" → Name
+        if elem_local in {"value", "tag"}:
+            target_id = elem.get("TargetID", "")
+            if target_id == "@OpenLink":
+                for name_elem in elem:
+                    if local_name(name_elem.tag).lower() == "name":
+                        if name_elem.text and name_elem.text.strip():
+                            text = name_elem.text.strip()
+                            if text in placeholder_tags:
+                                remaining.append(text)
+
     return remaining
+
+
+def assert_no_template_tag_leak(xml_root, template_tag_names: set[str]) -> None:
+    """阻断检查：最终 XML 中不得残留任何模板变量名。
+
+    如果存在泄漏，抛出 ValueError 并列出残留变量名。
+    这必须在导入 TIA Portal 前调用，防止模板变量混入真实项目。
+
+    参数:
+        xml_root: XML 根元素 (ET.Element)
+        template_tag_names: 模板变量名集合
+
+    抛出:
+        ValueError: 存在模板变量泄漏时
+    """
+    import xml.etree.ElementTree as ET
+    xml_text = ET.tostring(xml_root, encoding="unicode")
+
+    leaked = sorted([
+        name for name in template_tag_names
+        if name and name in xml_text
+    ])
+
+    if leaked:
+        raise ValueError(
+            "Template tag leaked into generated screen XML: "
+            + ", ".join(leaked)
+        )
 
 
 def assign_unique_control_ids(node: ET.Element, id_registry: set[str] | None = None) -> None:

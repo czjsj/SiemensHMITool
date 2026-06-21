@@ -28,7 +28,7 @@ IR_SCHEMA_DOC = r"""
 
   "tags": [
     {
-      "name": "英文变量名，如 Motor_Start",
+      "name": "英文变量名，格式必须为 类型前缀_控件名_功能，如 BTN_Motor_Start",
       "data_type": "枚举：Bool | Int | DInt | Real | Word | String",
       "address": "可选，PLC 关联地址，如 %M0.0 / %DB1.DBX0.0，不确定就给空串",
       "comment": "中文注释"
@@ -123,7 +123,7 @@ TEXT_CONVENTIONS = r"""
 1. 画面上所有面向操作员的可见文字一律使用简体中文，术语保持统一：
    启动/停止/复位/确认/取消/急停/手动/自动/运行/停止/故障/报警/就绪/允许/禁止/登录/退出。
 2. 变量名(name)、对象ID、画面名、脚本名一律使用英文 + 下划线，见名知意，
-   例如：Motor_Start、IO_Speed、LMP_Fault、Sub_Login。
+   例如：BTN_Motor_Start、IO_Motor_Speed、LMP_Motor_Fault、Sub_Login。
 3. 指示灯命名前缀 LMP_，按钮 BTN_，文本 IO 域 IO_，符号 IO 域 SIO_，静态文本 TXT_。
 4. 数值类 IO 域如有物理单位，必须通过 unit 字段给出（rpm、℃、bar、% 等）。
 5. 故障/报警类指示灯优先使用红色系并置 blink=true；运行类用绿色系；
@@ -135,22 +135,45 @@ TEXT_CONVENTIONS = r"""
 TAG_CONVENTIONS = r"""
 【变量绑定硬性规范 — 必须严格遵守】
 1. 所有 Button / Indicator / IOField / SymbolicIOField 对象都必须包含 process_tag 字段。
-2. 变量名（process_tag）命名前缀规则：
-   - 瞬时按钮 → BTN_ 前缀，例如 BTN_Start、BTN_Stop
-   - 自保持/切换按钮 → MEM_ 前缀，例如 MEM_Mode、MEM_HandAuto
-     判断依据：按钮文字含"切换/自保持/手动自动/本地远程/正转反转"等词 → MEM_；
-              普通启停/复位 → BTN_
-   - 运行/状态指示灯 → STS_ 前缀，例如 STS_Run、STS_Ready
-   - 故障/报警指示灯 → LMP_ 前缀，例如 LMP_Fault、LMP_Alarm
-     判断依据：文字含"故障/报警/急停/过载/异常"或置了 blink=true → LMP_
-   - 数值 IO 域 → IO_ 前缀，例如 IO_Speed、IO_Temp
-   - 符号 IO 域 → SIO_ 前缀，例如 SIO_Mode、SIO_State
-3. 每个声明的 process_tag 对应的变量必须出现在 tags 数组中。
-4. 按钮必须标注 tag_mode：
+2. 变量名强制格式：{类型前缀}_{控件/设备名}_{具体功能}
+   这是最关键的一条规则，违反将导致变量无法正确导入 TIA Portal。
+   格式说明：
+     - 类型前缀：根据控件类型确定（见下表第3条），决定 data_type
+     - 控件/设备名：该变量关联的英文设备名（如 Motor、Pump、Valve、Conveyor）
+     - 具体功能：英文功能描述（如 Start、Stop、Speed、Running、Fault）
+   正确示例 vs 错误示例：
+     ✅ BTN_Motor_Start    ❌ Motor_Start（缺类型前缀）
+     ✅ BTN_Motor_Stop     ❌ BTN_Start（缺设备名）
+     ✅ MEM_Pump_Mode      ❌ Pump_Mode（缺类型前缀）
+     ✅ STS_Motor_Running  ❌ Motor_Running（缺类型前缀）
+     ✅ LMP_Motor_Fault    ❌ Motor_Fault（缺类型前缀）
+     ✅ IO_Motor_Speed     ❌ Motor_Speed（缺类型前缀）
+     ✅ SIO_Motor_Mode     ❌ Motor_Mode（缺类型前缀）
+3. 类型前缀与 data_type 强制对应表（前缀即类型，类型即 data_type）：
+   | 控件类型            | 前缀  | data_type | 完整示例              |
+   |---------------------|-------|-----------|----------------------|
+   | Button 瞬时按钮      | BTN_ | Bool      | BTN_Motor_Start       |
+   | Button 自保持/切换   | MEM_ | Bool      | MEM_Motor_HandAuto    |
+   | Indicator 运行/状态  | STS_ | Bool      | STS_Motor_Running     |
+   | Indicator 故障/报警  | LMP_ | Bool      | LMP_Motor_Fault       |
+   | IOField 数值域       | IO_  | Real/Int  | IO_Motor_Speed(Real)  |
+   | SymbolicIOField      | SIO_ | Int       | SIO_Motor_Mode        |
+   BTN_/MEM_/STS_/LMP_ 前缀的变量 → data_type 必须为 "Bool"，没有任何例外。
+   IO_ 前缀且含物理量关键词（转速/温度/压力/流量/液位/频率/设定值）→ "Real"。
+   IO_ 前缀的纯符号/状态量 → 可为 "Int"。
+   判断依据：
+     - 按钮文字含"切换/自保持/手动自动/本地远程/正转反转" → MEM_ 前缀
+     - 普通启停/复位/确认 → BTN_ 前缀
+     - 指示灯文字含"故障/报警/急停/过载/异常"或 blink=true → LMP_ 前缀
+     - 普通运行/就绪/状态指示灯 → STS_ 前缀
+4. 每个声明的 process_tag 对应的变量必须出现在 tags 数组中，name 字段与 process_tag 完全一致。
+5. 绝对不允许将变量名写成不带前缀的形式（如 Motor_Start、Pump_Running）。
+   所有变量名必须在开头包含类型前缀。
+6. 按钮必须标注 tag_mode：
    - "momentary"：瞬时按钮（按下置1，释放置0）
    - "toggle"：自保持切换按钮（每次按下翻转状态）
-5. 指示灯对象可选 blink_tag 字段（用于指定闪烁绑定的变量，通常与 process_tag 相同）。
-6. 不允许使用没有意义的变量名如 var1、tag2、temp。
+7. 指示灯对象可选 blink_tag 字段（用于指定闪烁绑定的变量，通常与 process_tag 相同）。
+8. 不允许使用没有意义的变量名如 var1、tag2、temp。
 """
 
 VBS_CONVENTIONS = r"""
@@ -279,18 +302,18 @@ FEW_SHOT_ASSISTANT = r'''```json
   "meta": {
     "screen_name": "Motor_Control",
     "title": "电机控制画面",
-    "description": "电机启停控制：启动/停止/复位按钮，运行与故障指示灯，转速与运行模式显示。假设转速变量为 Real，模式为 Int(0停止/1手动/2自动)。采用按钮区、状态区、参数区三段式布局。",
+    "description": "电机启停控制：启动/停止/复位按钮，运行与故障指示灯，转速与运行模式显示。采用按钮区、状态区、参数区三段式布局。所有变量名强制使用 类型前缀_设备名_功能 格式。",
     "resolution": "1280x800",
     "hmi_type": "Comfort"
   },
   "tags": [
-    { "name": "Motor_Start",   "data_type": "Bool", "address": "%M0.0", "comment": "启动命令" },
-    { "name": "Motor_Stop",    "data_type": "Bool", "address": "%M0.1", "comment": "停止命令" },
-    { "name": "Motor_Reset",   "data_type": "Bool", "address": "%M0.2", "comment": "故障复位" },
-    { "name": "Motor_Running", "data_type": "Bool", "address": "%M0.3", "comment": "运行反馈" },
-    { "name": "Motor_Fault",   "data_type": "Bool", "address": "%M0.4", "comment": "故障标志" },
-    { "name": "Motor_Speed",   "data_type": "Real", "address": "%MD10", "comment": "转速 rpm" },
-    { "name": "Motor_Mode",    "data_type": "Int",  "address": "%MW20", "comment": "运行模式" }
+    { "name": "BTN_Motor_Start",   "data_type": "Bool", "address": "%M0.0", "comment": "启动命令" },
+    { "name": "BTN_Motor_Stop",    "data_type": "Bool", "address": "%M0.1", "comment": "停止命令" },
+    { "name": "BTN_Motor_Reset",   "data_type": "Bool", "address": "%M0.2", "comment": "故障复位" },
+    { "name": "STS_Motor_Running", "data_type": "Bool", "address": "%M0.3", "comment": "运行反馈" },
+    { "name": "LMP_Motor_Fault",   "data_type": "Bool", "address": "%M0.4", "comment": "故障标志" },
+    { "name": "IO_Motor_Speed",    "data_type": "Real", "address": "%MD10", "comment": "转速 rpm" },
+    { "name": "SIO_Motor_Mode",    "data_type": "Int",  "address": "%MW20", "comment": "运行模式 0停止/1手动/2自动" }
   ],
   "text_lists": [
     {
@@ -305,34 +328,34 @@ FEW_SHOT_ASSISTANT = r'''```json
   "objects": [
     { "id": "TXT_Title", "type": "Text", "x": 430, "y": 28, "width": 420, "height": 44, "text": "电机控制画面", "font_size": 26, "bold": true, "color": "#E6EDF3" },
 
-    { "id": "BTN_Start", "type": "Button", "x": 120, "y": 130, "width": 130, "height": 56, "text": "启动", "press_script": "Sub_Start", "release_script": null, "click_script": null, "background_color": "#27D17F" },
-    { "id": "BTN_Stop",  "type": "Button", "x": 280, "y": 130, "width": 130, "height": 56, "text": "停止", "press_script": "Sub_Stop",  "release_script": null, "click_script": null, "background_color": "#E25563" },
-    { "id": "BTN_Reset", "type": "Button", "x": 440, "y": 130, "width": 130, "height": 56, "text": "复位", "press_script": "Sub_Reset", "release_script": null, "click_script": null, "background_color": "#3A4250" },
+    { "id": "BTN_Start", "type": "Button", "x": 120, "y": 130, "width": 130, "height": 56, "text": "启动", "process_tag": "BTN_Motor_Start", "tag_mode": "momentary", "press_script": "Sub_Start", "release_script": null, "click_script": null, "background_color": "#27D17F" },
+    { "id": "BTN_Stop",  "type": "Button", "x": 280, "y": 130, "width": 130, "height": 56, "text": "停止", "process_tag": "BTN_Motor_Stop",  "tag_mode": "momentary", "press_script": "Sub_Stop",  "release_script": null, "click_script": null, "background_color": "#E25563" },
+    { "id": "BTN_Reset", "type": "Button", "x": 440, "y": 130, "width": 130, "height": 56, "text": "复位", "process_tag": "BTN_Motor_Reset", "tag_mode": "momentary", "press_script": "Sub_Reset", "release_script": null, "click_script": null, "background_color": "#3A4250" },
 
-    { "id": "LMP_Run",   "type": "Indicator", "x": 760, "y": 158, "radius": 22, "process_tag": "Motor_Running", "color_on": "#27D17F", "color_off": "#3A4250", "blink": false, "label": "运行" },
-    { "id": "LMP_Fault", "type": "Indicator", "x": 900, "y": 158, "radius": 22, "process_tag": "Motor_Fault",   "color_on": "#E25563", "color_off": "#3A4250", "blink": true,  "label": "故障" },
+    { "id": "LMP_Run",   "type": "Indicator", "x": 760, "y": 158, "radius": 22, "process_tag": "STS_Motor_Running", "color_on": "#27D17F", "color_off": "#3A4250", "blink": false, "label": "运行" },
+    { "id": "LMP_Fault", "type": "Indicator", "x": 900, "y": 158, "radius": 22, "process_tag": "LMP_Motor_Fault",   "color_on": "#E25563", "color_off": "#3A4250", "blink": true,  "label": "故障" },
 
-    { "id": "IO_Speed", "type": "IOField", "x": 280, "y": 300, "width": 170, "height": 44, "mode": "Output", "process_tag": "Motor_Speed", "display_format": "Decimal", "decimal_digits": 0, "font_size": 18, "label": "转速", "unit": "rpm" },
-    { "id": "SIO_Mode", "type": "SymbolicIOField", "x": 280, "y": 380, "width": 170, "height": 44, "mode": "Output", "process_tag": "Motor_Mode", "text_list": "Motor_Mode_List", "font_size": 18, "label": "运行模式" }
+    { "id": "IO_Speed", "type": "IOField", "x": 280, "y": 300, "width": 170, "height": 44, "mode": "Output", "process_tag": "IO_Motor_Speed", "display_format": "Decimal", "decimal_digits": 0, "font_size": 18, "label": "转速", "unit": "rpm" },
+    { "id": "SIO_Mode", "type": "SymbolicIOField", "x": 280, "y": 380, "width": 170, "height": 44, "mode": "Output", "process_tag": "SIO_Motor_Mode", "text_list": "Motor_Mode_List", "font_size": 18, "label": "运行模式" }
   ],
   "scripts": [
     {
       "name": "Sub_Start",
       "language": "VBS",
       "purpose": "按下启动按钮：置位启动命令，复位停止命令",
-      "code": "' 启动按钮：发出启动命令\nSmartTags(\"Motor_Start\") = 1\nSmartTags(\"Motor_Stop\") = 0"
+      "code": "' 启动按钮：发出启动命令\nSmartTags(\"BTN_Motor_Start\") = 1\nSmartTags(\"BTN_Motor_Stop\") = 0"
     },
     {
       "name": "Sub_Stop",
       "language": "VBS",
       "purpose": "按下停止按钮：置位停止命令，复位启动命令",
-      "code": "' 停止按钮：发出停止命令\nSmartTags(\"Motor_Stop\") = 1\nSmartTags(\"Motor_Start\") = 0"
+      "code": "' 停止按钮：发出停止命令\nSmartTags(\"BTN_Motor_Stop\") = 1\nSmartTags(\"BTN_Motor_Start\") = 0"
     },
     {
       "name": "Sub_Reset",
       "language": "VBS",
       "purpose": "按下复位按钮：复位故障",
-      "code": "' 复位按钮：清除故障\nSmartTags(\"Motor_Reset\") = 1"
+      "code": "' 复位按钮：清除故障\nSmartTags(\"BTN_Motor_Reset\") = 1"
     }
   ]
 }

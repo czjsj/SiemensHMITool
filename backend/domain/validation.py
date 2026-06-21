@@ -273,6 +273,67 @@ def validate_template_binding_requirements(project: HmiProjectSpec) -> list[Diag
     return diagnostics
 
 
+def validate_action_target_types(project: HmiProjectSpec) -> list[Diagnostic]:
+    """校验 bit 操作的目标变量类型。
+
+    SET_BIT / RESET_BIT / TOGGLE_BIT 的目标变量必须是 Bool。
+    如果不是 Bool，记录 ERROR 级别诊断。
+
+    参数:
+        project: HmiProjectSpec 实例
+
+    返回:
+        诊断信息列表
+    """
+    BIT_ACTIONS = {"SET_BIT", "RESET_BIT", "TOGGLE_BIT", "INVERT_BIT"}
+
+    diagnostics: list[Diagnostic] = []
+    tag_map = {t.name: t for t in project.tags}
+
+    for screen in project.screens:
+        for item in screen.items:
+            for event in item.events:
+                for action in event.actions:
+                    action_type = str(action.type.value).upper() if hasattr(action.type, 'value') else str(action.type).upper()
+
+                    if action_type in BIT_ACTIONS:
+                        target = action.tag
+                        if not target:
+                            continue
+
+                        tag = tag_map.get(target)
+                        if not tag:
+                            diagnostics.append(Diagnostic(
+                                code=DiagnosticCodes.VERIFY_TAG_MISSING,
+                                severity=DiagnosticSeverity.ERROR,
+                                phase="P30_TAG_TABLES_AND_TAGS",
+                                object_type="action",
+                                object_name=item.id,
+                                message=f"Bit 操作 {action_type} 的目标变量 '{target}' 未在 project.tags 中定义",
+                            ))
+                            continue
+
+                        # 归一化类型比较
+                        actual_type = tag.data_type
+                        normalized = actual_type.strip().capitalize() if actual_type else ""
+                        # 支持 Bool 的各种写法
+                        if normalized not in ("Bool", "Boolean", "Bit"):
+                            diagnostics.append(Diagnostic(
+                                code=DiagnosticCodes.IR_VALIDATION_ERROR,
+                                severity=DiagnosticSeverity.ERROR,
+                                phase="P30_TAG_TABLES_AND_TAGS",
+                                object_type="action",
+                                object_name=item.id,
+                                message=(
+                                    f"Bit 操作 {action_type} 的目标变量 '{target}' "
+                                    f"类型为 {actual_type}，必须是 Bool"
+                                ),
+                                remediation=f"请将变量 '{target}' 的类型改为 Bool",
+                            ))
+
+    return diagnostics
+
+
 def _validate_button_binding(
     item: 'ScreenItemSpec',
     tag_names: set[str],

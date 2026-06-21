@@ -1052,6 +1052,7 @@ def generate_from_template_v4(
         replace_all_tag_references,
         ensure_no_placeholder_tags,
         assign_unique_control_ids,
+        assert_no_template_tag_leak,
     )
     from backend.template.xml_utils import collect_existing_ids, deepcopy_xml_node
     from backend.template.template_binding_validator import validate_generated_screen_xml
@@ -1107,12 +1108,19 @@ def generate_from_template_v4(
     # ---- Step 3: Prototype matching for each screen item ----
     registry = PrototypeRegistry(profile)
 
-    # Collect template variable names
+    # V5.5: Collect ALL template variable names from prototypes
+    # Every tag reference detected in the template is a placeholder that must be replaced.
+    # Previously filtered too narrowly ("Template_" in name or source_name in name),
+    # which excluded common Comfort template names like "Button" and "Light".
     template_tags: set[str] = set()
     for proto in profile.all_prototypes():
         for ref in proto.tag_references:
-            if "Template_" in ref.tag_name or proto.source_name in ref.tag_name:
-                template_tags.add(ref.tag_name)
+            if ref.tag_name and ref.tag_name.strip():
+                template_tags.add(ref.tag_name.strip())
+        # Also include replaceable_tags from prototype (already deduplicated tag names)
+        for rt in proto.replaceable_tags:
+            if rt and rt.strip():
+                template_tags.add(rt.strip())
 
     # Parse template root for XML operations
     try:
@@ -1217,6 +1225,19 @@ def generate_from_template_v4(
     tag_names = [t.name for t in project.tags]
     item_ids = [item.id for screen in project.screens for item in screen.items]
     forbidden_placeholders = [t for t in template_tags if "Template_" in t]
+
+    # V5.5: Hard block — template tag leak detection before pre-import validation
+    if forbidden_placeholders:
+        try:
+            screen_root = ET.fromstring(screen_xml)
+            assert_no_template_tag_leak(screen_root, set(forbidden_placeholders))
+        except ValueError as e:
+            return {
+                "ok": False,
+                "xml": None, "xml_path": None,
+                "warnings": [str(e)],
+                "diagnostics": diagnostics,
+            }
 
     pre_diags = validate_generated_screen_xml(
         screen_xml, tag_names, forbidden_placeholders, item_ids

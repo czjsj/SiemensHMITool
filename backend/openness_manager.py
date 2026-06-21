@@ -970,6 +970,51 @@ class OpennessManager:
         compiler = sw.GetService[ICompilable]()
         compiler.Compile()
 
+    def _resolve_hmi_tag_table_template_path(self) -> str:
+        """Resolve the exported HMI tag table template path for Classic import."""
+        import glob
+
+        tmpl_cfg = self.cfg.get("classic_template", {}) or {}
+        candidates: list[str] = []
+        for key in (
+            "tag_template_xml_path",
+            "tag_table_template_xml_path",
+            "hmi_tag_template_xml_path",
+        ):
+            value = str(tmpl_cfg.get(key, "") or "").strip()
+            if value:
+                candidates.append(value)
+
+        screen_template = str(tmpl_cfg.get("template_xml_path", "") or "").strip()
+        if screen_template:
+            base, ext = os.path.splitext(screen_template)
+            if base.endswith("_template"):
+                candidates.append(base[:-len("_template")] + "_hmi_tags_template" + ext)
+            candidates.append(base + "_hmi_tags_template" + ext)
+
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        export_dir = str(tmpl_cfg.get("template_export_dir", "exports/templates") or "")
+        if export_dir and not os.path.isabs(export_dir):
+            export_dir = os.path.join(base_dir, export_dir)
+        if export_dir:
+            pattern = os.path.join(export_dir, "*_hmi_tags_template.xml")
+            try:
+                candidates.extend(
+                    sorted(glob.glob(pattern), key=os.path.getmtime, reverse=True)
+                )
+            except Exception:
+                pass
+
+        for path in candidates:
+            if not path:
+                continue
+            if not os.path.isabs(path):
+                path = os.path.join(base_dir, path)
+            path = os.path.abspath(path)
+            if os.path.isfile(path):
+                return path
+        return ""
+
     # ------------------------------------------------------------------
     # 变量表同步（VariableEngine 集成）— V4.2 家族感知路由
     # ------------------------------------------------------------------
@@ -990,7 +1035,14 @@ class OpennessManager:
         import logging
         logger = logging.getLogger(__name__)
 
-        result: dict = {"ok": False, "created": [], "skipped": [], "errors": []}
+        result: dict = {
+            "ok": False,
+            "created": [],
+            "updated": [],
+            "skipped": [],
+            "errors": [],
+            "warnings": [],
+        }
 
         if not self._project:
             result["errors"].append("尚未连接到博途项目。")
@@ -1048,23 +1100,24 @@ class OpennessManager:
             existing_names = container["existing_names"]
             access_path = container["access_path"]
 
-            # 过滤已存在的变量
+            # Do not filter existing tags out here. Existing tags may have been
+            # imported earlier with TIA's default Int type and still need a
+            # DataType correction in the executor.
             skipped: list[str] = []
-            new_tags: list[dict] = []
+            tags_to_sync: list[dict] = []
             for t in tags:
                 name = str(t.get("name", "")).strip()
                 if not name:
                     continue
                 if name in existing_names:
                     skipped.append(name)
-                else:
-                    new_tags.append(t)
+                tags_to_sync.append(t)
 
             result["skipped"] = skipped
 
-            if not new_tags:
-                result["ok"] = len(skipped) > 0
-                if not result["ok"] and not result["errors"]:
+            if not tags_to_sync:
+                result["ok"] = False
+                if not result["errors"]:
                     result["errors"].append("没有可创建的变量。")
                 return result
 
@@ -1075,16 +1128,28 @@ class OpennessManager:
                 # (TagComposition lacks Create() but TagTable may support it)
                 # Currently using XML import as the available mechanism.
                 # XML format must NOT contain Siemens.Engineering.SW.* types.
-                from backend.openness.classic_executor import ClassicOpennessExecutor
-                from backend.backends.classic.tag_xml_builder import TagXmlBuilder, HmiTagXmlBuilder
+                from backend.openness.classic_executor import (
+                    ClassicOpennessExecutor,
+                    ClassicStepResult,
+                )
+                from backend.backends.classic.tag_xml_builder import (
+                    HmiTagXmlBuilder,
+                    HmiTagTableTemplateBuilder,
+                )
                 from backend.domain.ir_v2 import TagSpec
-                from backend.domain.enums import TagScope
+                from backend.domain.enums import DiagnosticSeverity, OpennessOperationKind, TagScope
+                from backend.domain.diagnostics import Diagnostic, DiagnosticCodes
 
                 tag_specs = []
                 tag_items: list[dict] = []
-                for t in new_tags:
+                for t in tags_to_sync:
                     name = str(t.get("name", "")).strip()
                     data_type = str(t.get("data_type", "Bool")).strip()
+                    # V5.5R3: 最后一公里安全网 — 基于变量名前缀强制纠正类型
+                    # 无论上游如何（AI 输出 Int、VariableEngine 回写断裂等），
+                    # 此处是变量进入 TIA Portal 的最后一道关卡。
+                    # BTN_/MEM_/STS_/LMP_ 前缀变量强制为 Bool。
+                    data_type = _force_tag_data_type_by_name(name, data_type)
                     addr = str(t.get("address", "")).strip()
                     scope = TagScope.EXTERNAL if addr else TagScope.INTERNAL
 
@@ -1111,31 +1176,105 @@ class OpennessManager:
                         item["connection"] = conn
                     tag_items.append(item)
 
-                hmi_builder = HmiTagXmlBuilder()
-                tags_xml = hmi_builder.build_batch_tags_xml(tag_items)
                 executor = ClassicOpennessExecutor()
-                # V4.2: XML Import 主路径（无 UPSERT Create 回退）
-                step_result = executor.import_hmi_tags_safe(sw, tags_xml, tag_items)
 
-                # Enhanced diagnostic for SW.Tag/SW.Blocks type mismatch
-                for d in step_result.diagnostics:
-                    if d.code == "TAG_XML_WRONG_CLASS":
-                        logger.error(
-                            "HMI 变量同步阻断：XML 类型错误。TagComposition.Import 只能导入 HMI tag XML，"
-                            "但当前 XML 的类型被判定为 PLC 类型。请检查 TagXmlBuilder 生成逻辑。"
+                # Preferred path for Basic/KTP Basic:
+                # clone a real exported DefaultTagTable XML and import it via
+                # TagFolder.TagTables.Import. This preserves Siemens' real
+                # DataType representation instead of passing DataType as string.
+                tag_template_path = self._resolve_hmi_tag_table_template_path()
+                if tag_template_path:
+                    try:
+                        with open(
+                            tag_template_path,
+                            "r",
+                            encoding="utf-8-sig",
+                            errors="ignore",
+                        ) as f:
+                            tag_template_xml = f.read()
+                        tags_xml, build_warnings = (
+                            HmiTagTableTemplateBuilder().build_from_template(
+                                tag_template_xml, tag_items,
+                            )
                         )
-                        # Log the XML snippet for debugging
-                        if hasattr(step_result, 'temp_files') and step_result.temp_files:
-                            for tf in step_result.temp_files:
-                                try:
-                                    with open(tf, 'r', encoding='utf-8') as f:
-                                        content = f.read()
-                                    logger.debug("Failed XML content:\n%s", content[:500])
-                                except Exception:
-                                    pass
+                        result["warnings"].extend(build_warnings)
+                        step_result = executor.import_hmi_tag_table_template_safe(
+                            sw, tags_xml, tag_items,
+                        )
+                        step_result.api_calls.append(
+                            f"hmi_tag_table_template_path={tag_template_path}"
+                        )
+                    except Exception as exc:
+                        step_result = ClassicStepResult(
+                            "tags", OpennessOperationKind.TIA_MUTATION,
+                        )
+                        step_result.diagnostics.append(Diagnostic(
+                            code=DiagnosticCodes.TAG_XML_IMPORT_FAILED,
+                            severity=DiagnosticSeverity.ERROR,
+                            phase="P30_TAG_TABLES_AND_TAGS",
+                            message=f"基于 HMI 变量表模板生成/导入变量失败: {exc}",
+                            details={"tag_template_path": tag_template_path},
+                            remediation=(
+                                "请重新点击“导出模板”，确保同时导出了 HMI 变量表模板，"
+                                "且模板中至少包含一个 Bool 类型和一个普通变量。"
+                            ),
+                        ))
+                else:
+                    # Backward-compatible fallback. If Create is unavailable,
+                    # return an explicit template-missing diagnostic instead of
+                    # silently importing guessed XML that defaults to Int.
+                    step_result = executor.create_hmi_tags_via_api(sw, tag_items)
+
+                    create_not_supported = any(
+                        "TAG_CREATE_NOT_SUPPORTED" in str(getattr(d, "code", ""))
+                        for d in step_result.diagnostics
+                    )
+
+                    if create_not_supported or (
+                        not step_result.success
+                        and any(
+                            "不支持 Create" in str(getattr(d, "message", ""))
+                            for d in step_result.diagnostics
+                        )
+                    ):
+                        logger.info(
+                            "TagComposition.Create 不可用，且未找到 HMI 变量表模板"
+                        )
+                        hmi_builder = HmiTagXmlBuilder()
+                        tags_xml = ""
+                        step_result = executor.import_hmi_tags_safe(
+                            sw, tags_xml, tag_items,
+                        )
+
+                    # Enhanced diagnostic for SW.Tag/SW.Blocks type mismatch
+                    for d in step_result.diagnostics:
+                        if d.code == "TAG_XML_WRONG_CLASS":
+                            logger.error(
+                                "HMI 变量同步阻断：XML 类型错误。"
+                                "TagComposition.Import 只能导入 HMI tag XML，"
+                                "但当前 XML 的类型被判定为 PLC 类型。"
+                            )
+                            # Log the XML snippet for debugging
+                            if hasattr(step_result, 'temp_files') and step_result.temp_files:
+                                for tf in step_result.temp_files:
+                                    try:
+                                        with open(tf, 'r', encoding='utf-8') as f:
+                                            content = f.read()
+                                        logger.debug("Failed XML content:\n%s", content[:500])
+                                    except Exception:
+                                        pass
 
                 if step_result.success:
-                    result["created"] = [t["name"] for t in new_tags]
+                    result["created"] = [
+                        str(t.get("name", "")).strip()
+                        for t in tags_to_sync
+                        if str(t.get("name", "")).strip() not in existing_names
+                    ]
+                    result["updated"] = [
+                        str(t.get("name", "")).strip()
+                        for t in tags_to_sync
+                        if str(t.get("name", "")).strip() in existing_names
+                    ]
                     result["ok"] = True
                 else:
                     # 检查 payload 中的部分成功信息
@@ -1144,7 +1283,7 @@ class OpennessManager:
                     imported_count = payload.get("imported_count", 0)
                     if imported_count > 0:
                         result["created"] = [
-                            n for n in [t["name"] for t in new_tags]
+                            n for n in [t["name"] for t in tags_to_sync]
                             if n not in missing_tags
                         ]
                         result["ok"] = True if result["created"] else False
@@ -1162,13 +1301,22 @@ class OpennessManager:
                         "name": str(t.get("name", "")).strip(),
                         "data_type": str(t.get("data_type", "Bool")).strip(),
                     }
-                    for t in new_tags
+                    for t in tags_to_sync
                 ]
                 executor = UnifiedOpennessExecutor()
                 step_result = executor.create_tags(sw, specs)
 
                 if step_result.success:
-                    result["created"] = [t["name"] for t in new_tags]
+                    result["created"] = [
+                        str(t.get("name", "")).strip()
+                        for t in tags_to_sync
+                        if str(t.get("name", "")).strip() not in existing_names
+                    ]
+                    result["updated"] = [
+                        str(t.get("name", "")).strip()
+                        for t in tags_to_sync
+                        if str(t.get("name", "")).strip() in existing_names
+                    ]
                     result["ok"] = True
                 else:
                     for d in step_result.diagnostics:
@@ -1419,7 +1567,7 @@ class OpennessManager:
         export_dir: str = "",
         overwrite: bool = True,
     ) -> dict:
-        """导出指定 HMI 画面为模板 XML 文件。
+        """导出指定 HMI 画面和默认 HMI 变量表为模板 XML 文件。
 
         参数:
             screen_name: 要导出的画面名称。为空则导出第一个画面。
@@ -1427,7 +1575,8 @@ class OpennessManager:
             overwrite: 是否覆盖已有文件。
 
         返回:
-            {"ok": True, "screen_name": "...", "xml_path": "...", "xml": "...", ...}
+            {"ok": True, "screen_name": "...", "xml_path": "...",
+             "tag_template_path": "...", "xml": "...", "tag_xml": "...", ...}
         """
         warnings: list = []
         if not self._project:
@@ -1464,12 +1613,23 @@ class OpennessManager:
             os.makedirs(export_dir, exist_ok=True)
 
             xml_path = os.path.join(export_dir, f"{actual_name}_template.xml")
+            tag_template_path = os.path.join(
+                export_dir, f"{actual_name}_hmi_tags_template.xml"
+            )
 
-            if os.path.exists(xml_path) and not overwrite:
+            existing_paths = [
+                p for p in (xml_path, tag_template_path)
+                if os.path.exists(p)
+            ]
+            if existing_paths and not overwrite:
                 return {
                     "ok": False,
-                    "message": f"模板 XML 已存在：{xml_path}（设置 overwrite=true 覆盖）",
+                    "message": (
+                        "模板 XML 已存在："
+                        f"{existing_paths}（设置 overwrite=true 覆盖）"
+                    ),
                     "xml_path": xml_path,
+                    "tag_template_path": tag_template_path,
                     "warnings": warnings,
                 }
 
@@ -1481,23 +1641,72 @@ class OpennessManager:
                     "ok": False,
                     "message": f"导出模板 XML 失败：{export_result.get('message', '')}",
                     "xml_path": xml_path,
+                    "tag_template_path": tag_template_path,
                     "warnings": warnings + export_result.get("warnings", []),
                     "details": {"attempts": export_result.get("attempts", [])},
                 }
 
+            tag_export_result = self._export_default_hmi_tag_table_to_file(
+                sw, tag_template_path,
+            )
+            if not tag_export_result.get("ok"):
+                return {
+                    "ok": False,
+                    "message": (
+                        "画面模板已导出，但 HMI 变量表模板导出失败："
+                        f"{tag_export_result.get('message', '')}"
+                    ),
+                    "screen_name": actual_name,
+                    "xml_path": xml_path,
+                    "screen_template_path": xml_path,
+                    "tag_template_path": tag_template_path,
+                    "tag_xml_path": tag_template_path,
+                    "warnings": (
+                        warnings
+                        + export_result.get("warnings", [])
+                        + tag_export_result.get("warnings", [])
+                    ),
+                    "details": {
+                        "screen_export_method": export_result.get("method"),
+                        "screen_attempts": export_result.get("attempts", []),
+                        "tag_attempts": tag_export_result.get("attempts", []),
+                    },
+                }
+
             with open(xml_path, "r", encoding="utf-8-sig", errors="ignore") as f:
                 xml_content = f.read()
+            with open(
+                tag_template_path, "r", encoding="utf-8-sig", errors="ignore"
+            ) as f:
+                tag_xml_content = f.read()
 
             return {
                 "ok": True,
                 "screen_name": actual_name,
                 "xml_path": xml_path,
+                "screen_template_path": xml_path,
+                "tag_template_path": tag_template_path,
+                "tag_xml_path": tag_template_path,
+                "template_paths": {
+                    "screen": xml_path,
+                    "hmi_tags": tag_template_path,
+                },
                 "xml": xml_content,
-                "message": f"模板 XML 已导出：{xml_path}",
-                "warnings": warnings + export_result.get("warnings", []),
+                "tag_xml": tag_xml_content,
+                "message": (
+                    "模板 XML 已导出："
+                    f"画面={xml_path}；HMI变量表={tag_template_path}"
+                ),
+                "warnings": (
+                    warnings
+                    + export_result.get("warnings", [])
+                    + tag_export_result.get("warnings", [])
+                ),
                 "details": {
                     "export_method": export_result.get("method"),
+                    "tag_export_method": tag_export_result.get("method"),
                     "attempts": export_result.get("attempts", []),
+                    "tag_attempts": tag_export_result.get("attempts", []),
                 },
             }
         except Exception as e:
@@ -2158,6 +2367,229 @@ class OpennessManager:
     # ------------------------------------------------------------------
     # 统一导出封装（核心修复：不再传 str 给 Screen.Export）
     # ------------------------------------------------------------------
+    def _export_default_hmi_tag_table_to_file(self, hmi_software, xml_path: str) -> dict:
+        """导出默认 HMI 变量表 XML，用作后续批量变量导入模板。"""
+        result: dict = {
+            "ok": False,
+            "xml_path": str(xml_path),
+            "warnings": [],
+            "attempts": [],
+        }
+
+        try:
+            tag_folder = getattr(hmi_software, "TagFolder", None)
+            if tag_folder is None:
+                result["message"] = "当前 HMI 对象没有 TagFolder，无法导出变量表模板。"
+                return result
+
+            default_table = getattr(tag_folder, "DefaultTagTable", None)
+            if default_table is None:
+                result["message"] = "未找到 TagFolder.DefaultTagTable。"
+                return result
+
+            table_name = str(getattr(default_table, "Name", "DefaultTagTable") or "DefaultTagTable")
+            result["tag_table_name"] = table_name
+
+            export_result = self._export_engineering_object_to_file(
+                default_table,
+                xml_path,
+                object_label=f"HMI TagTable '{table_name}'",
+            )
+            export_result["tag_table_name"] = table_name
+            return export_result
+        except Exception as exc:
+            result["message"] = f"导出默认 HMI 变量表异常：{exc}"
+            return result
+
+    def _export_engineering_object_to_file(
+        self,
+        engineering_object,
+        xml_path: str,
+        object_label: str = "Engineering object",
+    ) -> dict:
+        """使用常见 Openness Export 重载导出任意工程对象到 XML 文件。"""
+        from pathlib import Path
+
+        result: dict = {
+            "ok": False,
+            "xml_path": str(xml_path),
+            "warnings": [],
+            "attempts": [],
+        }
+
+        try:
+            xml_path = str(Path(xml_path).resolve())
+            Path(xml_path).parent.mkdir(parents=True, exist_ok=True)
+
+            import os as _os
+            if _os.path.exists(xml_path):
+                try:
+                    _os.remove(xml_path)
+                except Exception as rm_err:
+                    result["warnings"].append(
+                        f"无法删除已有文件 {xml_path}：{rm_err}"
+                    )
+
+            from System.IO import FileInfo  # type: ignore
+            from System.Reflection import BindingFlags  # type: ignore
+            from System import Array  # type: ignore
+            from System import Object as SystemObject  # type: ignore
+
+            file_info = FileInfo(xml_path)
+
+            export_options_cls = None
+            try:
+                from Siemens.Engineering import ExportOptions  # type: ignore
+                export_options_cls = ExportOptions
+            except Exception as e:
+                result["warnings"].append(
+                    f"无法导入 Siemens.Engineering.ExportOptions：{e}"
+                )
+
+            def _make_args(*items):
+                arr = Array.CreateInstance(SystemObject, len(items))
+                for i, item in enumerate(items):
+                    arr[i] = item
+                return arr
+
+            obj_type = None
+            all_methods = []
+            export_methods = []
+            obj_type_name = type(engineering_object).__name__
+            try:
+                obj_type = engineering_object.GetType()
+                obj_type_name = str(obj_type.FullName or obj_type.Name)
+                all_methods = list(obj_type.GetMethods())
+                export_methods = [m for m in all_methods if m.Name == "Export"]
+                result["warnings"].append(
+                    f"{object_label} 对象类型：{obj_type_name}；"
+                    f"发现 {len(export_methods)} 个 Export 重载"
+                )
+                for m in export_methods:
+                    params = list(m.GetParameters())
+                    sig = ", ".join(
+                        str(p.ParameterType.FullName or p.ParameterType.Name)
+                        for p in params
+                    )
+                    result["attempts"].append({
+                        "method": "diagnostic",
+                        "detail": f"发现重载: Export({sig})",
+                        "param_count": len(params),
+                    })
+            except Exception as diag_exc:
+                result["warnings"].append(
+                    f"无法获取 {object_label} 类型信息：{diag_exc}"
+                )
+
+            if export_options_cls is not None:
+                for option_name in ("WithDefaults", "None"):
+                    try:
+                        export_option = getattr(export_options_cls, option_name)
+                    except Exception:
+                        continue
+                    try:
+                        engineering_object.Export(file_info, export_option)
+                        result["ok"] = True
+                        result["xml_path"] = xml_path
+                        result["method"] = (
+                            f"{object_label}.Export(FileInfo, ExportOptions.{option_name})"
+                        )
+                        return result
+                    except Exception as exc:
+                        result["attempts"].append({
+                            "method": f"direct Export(FileInfo, ExportOptions.{option_name})",
+                            "error": str(exc),
+                        })
+
+            try:
+                engineering_object.Export(file_info)
+                result["ok"] = True
+                result["xml_path"] = xml_path
+                result["method"] = f"{object_label}.Export(FileInfo)"
+                return result
+            except Exception as exc:
+                result["attempts"].append({
+                    "method": "direct Export(FileInfo)",
+                    "error": str(exc),
+                })
+
+            if obj_type is not None:
+                invoke_flags = (
+                    BindingFlags.InvokeMethod
+                    | BindingFlags.Public
+                    | BindingFlags.Instance
+                )
+                if export_options_cls is not None:
+                    for option_name in ("WithDefaults", "None"):
+                        try:
+                            export_option = getattr(export_options_cls, option_name)
+                            args = _make_args(file_info, export_option)
+                            obj_type.InvokeMember(
+                                "Export", invoke_flags, None, engineering_object, args
+                            )
+                            result["ok"] = True
+                            result["xml_path"] = xml_path
+                            result["method"] = (
+                                f"InvokeMember Export(FileInfo, ExportOptions.{option_name})"
+                            )
+                            return result
+                        except Exception as exc:
+                            result["attempts"].append({
+                                "method": f"InvokeMember Export(FileInfo, ExportOptions.{option_name})",
+                                "error": str(exc),
+                            })
+
+                try:
+                    args = _make_args(file_info)
+                    obj_type.InvokeMember(
+                        "Export", invoke_flags, None, engineering_object, args
+                    )
+                    result["ok"] = True
+                    result["xml_path"] = xml_path
+                    result["method"] = "InvokeMember Export(FileInfo)"
+                    return result
+                except Exception as exc:
+                    result["attempts"].append({
+                        "method": "InvokeMember Export(FileInfo)",
+                        "error": str(exc),
+                    })
+
+                for m in export_methods:
+                    params = list(m.GetParameters())
+                    invoke_args = []
+                    skipped = False
+                    for p in params:
+                        ptn = str(p.ParameterType.FullName or p.ParameterType.Name)
+                        if "FileInfo" in ptn:
+                            invoke_args.append(file_info)
+                        elif "ExportOptions" in ptn and export_options_cls is not None:
+                            invoke_args.append(export_options_cls.WithDefaults)
+                        else:
+                            skipped = True
+                            break
+                    if skipped:
+                        continue
+                    try:
+                        m.Invoke(engineering_object, _make_args(*invoke_args))
+                        result["ok"] = True
+                        result["xml_path"] = xml_path
+                        result["method"] = "MethodInfo.Invoke Export"
+                        return result
+                    except Exception as exc:
+                        result["attempts"].append({
+                            "method": "MethodInfo.Invoke Export",
+                            "error": str(exc),
+                        })
+
+            result["message"] = (
+                f"导出 {object_label} 失败：{obj_type_name} 上的 Export() "
+                "所有调用方式均失败。"
+            )
+            return result
+        except Exception as exc:
+            result["message"] = f"导出 {object_label} 异常：{exc}"
+            return result
+
     def _export_screen_to_file(self, screen, xml_path: str) -> dict:
         """使用 TIA Portal Openness 导出 HMI Screen 到 XML 文件。
 
@@ -2598,6 +3030,39 @@ class OpennessManager:
 # ========================================================================
 # V4.2: HMI 变量容器解析 — 反射探测 + 家族感知路由
 # ========================================================================
+
+# ========================================================================
+# V5.5R3: 变量名前缀 → 类型强制映射（最后一公里安全网）
+# ========================================================================
+
+# 强制为 Bool 的变量名前缀
+_BOOL_PREFIXES = ("BTN_", "MEM_", "STS_", "LMP_")
+
+def _force_tag_data_type_by_name(name: str, current_type: str) -> str:
+    """基于变量名前缀强制纠正数据类型。
+
+    这是变量进入 TIA Portal 之前的最后一道防线。
+    无论上游任何环节出错（AI 输出 Int、VariableEngine 回写断裂等），
+    此处基于命名约定强制纠正类型。
+
+    规则:
+      - BTN_ / MEM_ / STS_ / LMP_ 前缀 → 强制 Bool
+      - 其他 → 保持 current_type 不变
+    """
+    if not name:
+        return current_type
+    for prefix in _BOOL_PREFIXES:
+        if name.startswith(prefix):
+            if current_type != "Bool":
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    "安全网纠正: %s data_type %s → Bool（前缀 %s）",
+                    name, current_type, prefix,
+                )
+            return "Bool"
+    return current_type
+
 
 def _resolve_hmi_tag_container(sw, hmi_family: str) -> dict:
     """解析 HMI 变量容器，根据 HMI 家族返回正确的 Tag API 路径。

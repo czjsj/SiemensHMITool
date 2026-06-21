@@ -30,11 +30,11 @@
     Using <SW.Tag> with Hmi.Tag.TagComposition.Import will fail.
 -->
 <Engineering version="V16" xmlns="http://www.siemens.com/automation/HmiTagML">
-  <Hmi.Tag.Tag ID="{{TAG_ID}}" CompositionName="Tags" DataType="{{DATA_TYPE}}">
+  <Hmi.Tag.Tag ID="{{TAG_ID}}" CompositionName="Tags">
     <AttributeList>
       <Name>{{TAG_NAME}}</Name>
-      <!-- Internal tag: no Connection -->
-      <!-- DefaultTagTable omitted; import target already specifies table -->
+      <!-- DataType NOT in AttributeList; TIA Import rejects <DataType> child.
+           Types set via ClassicOpennessExecutor._correct_tag_data_types_after_import. -->
       <Comment>{{COMMENT}}</Comment>
     </AttributeList>
   </Hmi.Tag.Tag>

@@ -52,6 +52,7 @@ DEFAULT_CONFIG = {
             "enabled": True,
             "template_screen_name": "",
             "template_xml_path": "",
+            "tag_template_xml_path": "",
             "template_export_dir": "exports/templates",
             "generated_xml_dir": "exports/generated_from_template",
             "import_option": "Override",

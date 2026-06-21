@@ -61,6 +61,134 @@ def _safe_device_name(obj) -> str:
         return type(obj).__name__
 
 
+def _canonical_hmi_data_type(value: Any, fallback: str = "") -> str:
+    """Return a stable HMI data type name for comparison and enum parsing."""
+    raw = str(value or "").strip()
+    if not raw:
+        return fallback
+    raw = raw.strip("\"'")
+    if "." in raw:
+        raw = raw.rsplit(".", 1)[-1]
+    aliases = {
+        "bool": "Bool",
+        "boolean": "Bool",
+        "bit": "Bool",
+        "int": "Int",
+        "integer": "Int",
+        "short": "Int",
+        "uint": "UInt",
+        "word": "Word",
+        "dint": "DInt",
+        "doubleint": "DInt",
+        "udint": "UDInt",
+        "dword": "DWord",
+        "real": "Real",
+        "float": "Real",
+        "double": "Real",
+        "string": "String",
+        "wstring": "WString",
+        "text": "String",
+    }
+    return aliases.get(raw.replace("_", "").replace(" ", "").lower(), raw)
+
+
+def _hmi_data_types_equal(left: Any, right: Any) -> bool:
+    return (
+        _canonical_hmi_data_type(left).lower()
+        == _canonical_hmi_data_type(right).lower()
+    )
+
+
+def _set_hmi_tag_data_type(tag: Any, expected_type: str) -> tuple[bool, str]:
+    """Set HMI tag DataType via reflection and verify the persisted value."""
+    expected = _canonical_hmi_data_type(expected_type, fallback="Bool")
+    actual = ""
+
+    try:
+        tag_type = tag.GetType()
+        dt_prop = tag_type.GetProperty("DataType")
+    except Exception:
+        dt_prop = None
+
+    values_to_try: list[Any] = [expected]
+    try:
+        from System import String
+        values_to_try.append(String(expected))
+    except Exception:
+        pass
+
+    if dt_prop is not None:
+        try:
+            from System import Enum as SystemEnum
+            from System import String
+
+            dt_type = dt_prop.PropertyType
+            if getattr(dt_type, "IsEnum", False):
+                enum_name = expected
+                try:
+                    for candidate in SystemEnum.GetNames(dt_type):
+                        candidate_s = str(candidate)
+                        if _hmi_data_types_equal(candidate_s, expected):
+                            enum_name = candidate_s
+                            break
+                except Exception:
+                    pass
+                try:
+                    dt_value = SystemEnum.Parse(dt_type, enum_name, True)
+                except TypeError:
+                    dt_value = SystemEnum.Parse(dt_type, enum_name)
+            else:
+                dt_value = String(expected)
+            values_to_try.insert(0, dt_value)
+
+            try:
+                dt_prop.SetValue(tag, dt_value, None)
+            except TypeError:
+                dt_prop.SetValue(tag, dt_value)
+        except Exception:
+            pass
+
+    try:
+        actual = str(getattr(tag, "DataType", ""))
+    except Exception:
+        actual = ""
+    if _hmi_data_types_equal(actual, expected):
+        return True, actual
+
+    # Classic HMI engineering objects often expose SetAttribute even when
+    # Python property assignment is read-only or does not persist.
+    for attr_name in ("DataType", "data_type"):
+        for value in values_to_try:
+            try:
+                tag.SetAttribute(attr_name, value)
+            except Exception:
+                pass
+            try:
+                actual = str(getattr(tag, "DataType", ""))
+            except Exception:
+                actual = ""
+            if _hmi_data_types_equal(actual, expected):
+                return True, actual
+
+    for value in values_to_try:
+        try:
+            tag.DataType = value
+        except Exception:
+            pass
+        try:
+            actual = str(getattr(tag, "DataType", ""))
+        except Exception:
+            actual = ""
+        if _hmi_data_types_equal(actual, expected):
+            return True, actual
+
+    try:
+        actual = str(getattr(tag, "DataType", ""))
+    except Exception:
+        actual = ""
+    return _hmi_data_types_equal(actual, expected), actual
+
+
 # ------------------------------------------------------------------
 # Classic Tag Import Kind 检测
 # ------------------------------------------------------------------
@@ -139,6 +267,16 @@ def detect_tag_import_kind(xml_path: str) -> ClassicTagImportKind:
 
     # 2. 检查根元素下的子元素类型 (SW.Blocks → ...)
     if root_local == "Document":
+        for elem in root.iter():
+            raw_name = elem.tag.rsplit("}", 1)[-1] if "}" in elem.tag else elem.tag
+            elem_local = _local_tag_name(elem.tag)
+            elem_comp = _find_composition_name(elem, ns)
+            if (
+                raw_name == "Hmi.Tag.TagTable"
+                or elem_local in ("TagTable", "Tagtable")
+                or (elem_comp and ("TagTable" in elem_comp or "Tagtable" in elem_comp))
+            ):
+                return ClassicTagImportKind.TAG_TABLE
         for blocks in root:
             if _local_tag_name(blocks.tag) == "Blocks":
                 for child in blocks:
@@ -148,7 +286,10 @@ def detect_tag_import_kind(xml_path: str) -> ClassicTagImportKind:
         # 检查是否有 Tag 元素
         all_tags = root.findall(f".//{{{ns}}}Tag") if ns else root.findall(".//Tag")
         if not all_tags:
-            all_tags = root.findall(".//*[local-name()='Tag']")
+            all_tags = [
+                elem for elem in root.iter()
+                if _local_tag_name(elem.tag) == "Tag"
+            ]
         if all_tags:
             return ClassicTagImportKind.INDIVIDUAL_TAGS
 
@@ -158,6 +299,28 @@ def detect_tag_import_kind(xml_path: str) -> ClassicTagImportKind:
         if "TagTable" in composition_name or "Tagtable" in composition_name:
             return ClassicTagImportKind.TAG_TABLE
         if "Tag" in composition_name:
+            return ClassicTagImportKind.INDIVIDUAL_TAGS
+
+    # 4. Generic scan for Engineering-root exports.
+    for elem in root.iter():
+        raw_name = elem.tag.rsplit("}", 1)[-1] if "}" in elem.tag else elem.tag
+        elem_local = _local_tag_name(elem.tag)
+        elem_comp = _find_composition_name(elem, ns)
+        if (
+            raw_name == "Hmi.Tag.TagTable"
+            or elem_local in ("TagTable", "Tagtable")
+            or (elem_comp and ("TagTable" in elem_comp or "Tagtable" in elem_comp))
+        ):
+            return ClassicTagImportKind.TAG_TABLE
+    for elem in root.iter():
+        raw_name = elem.tag.rsplit("}", 1)[-1] if "}" in elem.tag else elem.tag
+        elem_local = _local_tag_name(elem.tag)
+        elem_comp = _find_composition_name(elem, ns)
+        if (
+            raw_name == "Hmi.Tag.Tag"
+            or elem_local == "Tag"
+            or (elem_comp and elem_comp == "Tags")
+        ):
             return ClassicTagImportKind.INDIVIDUAL_TAGS
 
     raise ValueError(
@@ -957,6 +1120,154 @@ class ClassicOpennessExecutor:
         else:
             return self._import_tags_to_default(hmi_software, xml_path, sha256)
 
+    def import_hmi_tag_table_template_safe(
+        self,
+        hmi_software,
+        tags_xml: str,
+        tag_items: list[dict] | None = None,
+    ) -> ClassicStepResult:
+        """Import HMI tags from a real exported HMI tag table template.
+
+        This is the preferred Basic/KTP Basic path. It imports the whole
+        exported tag table XML through TagFolder.TagTables.Import instead of
+        importing guessed individual Hmi.Tag.Tag XML through DefaultTagTable.
+        """
+        result = ClassicStepResult("tags", OpennessOperationKind.TIA_MUTATION)
+        expected_names = [
+            str(t.get("name", "")).strip()
+            for t in (tag_items or [])
+            if str(t.get("name", "")).strip()
+        ]
+
+        if not tags_xml or not tags_xml.strip():
+            result.diagnostics.append(Diagnostic(
+                code=DiagnosticCodes.HMI_TAG_XML_TEMPLATE_MISSING,
+                severity=DiagnosticSeverity.ERROR,
+                phase="P30_TAG_TABLES_AND_TAGS",
+                message="HMI 变量表模板生成结果为空，无法导入变量。",
+            ))
+            return result
+
+        temp_path = self._write_temp_xml(tags_xml, "tag_table_template")
+        result.temp_files.append(temp_path)
+        self._save_import_failure_copy(tags_xml, "tag_table_template_import")
+
+        try:
+            from backend.xml_validator import validate_tag_xml_for_import_target
+            validate_tag_xml_for_import_target(temp_path, "hmi_tag_table")
+        except Exception as guard_err:
+            result.diagnostics.append(Diagnostic(
+                code=DiagnosticCodes.TAG_XML_WRONG_CLASS,
+                severity=DiagnosticSeverity.ERROR,
+                phase="P30_TAG_TABLES_AND_TAGS",
+                message=(
+                    "HMI 变量表模板 XML 类型校验失败，不能导入到 "
+                    f"TagFolder.TagTables: {guard_err}"
+                ),
+                details={
+                    "stage": "PRE_IMPORT_TAG_TABLE_TEMPLATE_GUARD",
+                    "xml_path": temp_path,
+                    "exception_chain": collect_exception_chain(guard_err),
+                },
+            ))
+            return result
+
+        try:
+            kind = detect_tag_import_kind(temp_path)
+        except Exception as kind_err:
+            result.diagnostics.append(Diagnostic(
+                code=DiagnosticCodes.TAG_XML_WRONG_CLASS,
+                severity=DiagnosticSeverity.ERROR,
+                phase="P30_TAG_TABLES_AND_TAGS",
+                message=f"无法识别 HMI 变量表模板 XML 类型: {kind_err}",
+                details={
+                    "stage": "DETECT_TAG_TABLE_TEMPLATE_KIND",
+                    "xml_path": temp_path,
+                    "exception_chain": collect_exception_chain(kind_err),
+                },
+            ))
+            return result
+
+        if kind != ClassicTagImportKind.TAG_TABLE:
+            result.diagnostics.append(Diagnostic(
+                code=DiagnosticCodes.TAG_XML_WRONG_CLASS,
+                severity=DiagnosticSeverity.ERROR,
+                phase="P30_TAG_TABLES_AND_TAGS",
+                message=(
+                    "当前 XML 不是完整 HMI 变量表，不能走模板变量表导入。"
+                    f"检测结果: {kind}"
+                ),
+                details={"xml_path": temp_path, "detected_kind": str(kind)},
+            ))
+            return result
+
+        before_names = self.enumerate_existing_hmi_tags(hmi_software)
+        imported = self.import_tags(hmi_software, temp_path)
+        if temp_path not in imported.temp_files:
+            imported.temp_files.append(temp_path)
+        imported.api_calls.append(
+            "strategy_used=hmi_tag_table_template_clone "
+            f"expected={expected_names}"
+        )
+        if not imported.success:
+            return imported
+
+        try:
+            tag_folder = hmi_software.TagFolder
+            default_table = tag_folder.DefaultTagTable
+            tags_collection = default_table.Tags
+            after_names = set(enumerate_tag_names(tags_collection))
+        except Exception as read_err:
+            imported.success = False
+            imported.diagnostics.append(Diagnostic(
+                code=DiagnosticCodes.DEFAULT_TAG_TABLE_NOT_FOUND,
+                severity=DiagnosticSeverity.ERROR,
+                phase="P30_TAG_TABLES_AND_TAGS",
+                message=f"变量表导入后无法重新读取 DefaultTagTable.Tags: {read_err}",
+                details={"exception_chain": collect_exception_chain(read_err)},
+            ))
+            return imported
+
+        missing = sorted(set(expected_names) - after_names)
+        if missing:
+            imported.success = False
+            imported.diagnostics.append(Diagnostic(
+                code=DiagnosticCodes.IMPORT_TIA_EXCEPTION,
+                severity=DiagnosticSeverity.ERROR,
+                phase="P30_TAG_TABLES_AND_TAGS",
+                message=f"HMI 变量表模板导入后缺失变量: {missing}",
+                details={
+                    "missing_tags": missing,
+                    "before_count": len(before_names),
+                    "after_count": len(after_names),
+                },
+            ))
+            imported.payload = getattr(imported, "payload", {}) or {}
+            imported.payload["missing_tags"] = missing
+            return imported
+
+        dt_corrected = self._correct_tag_data_types_after_import(
+            tags_collection, tag_items or [],
+        )
+        if dt_corrected:
+            imported.api_calls.append(
+                f"DataType corrected after template import: {dt_corrected} tags"
+            )
+
+        imported.objects_created = len(after_names - before_names)
+        imported.objects_updated = len(set(expected_names) & before_names)
+        imported.payload = getattr(imported, "payload", {}) or {}
+        imported.payload["imported_count"] = len(expected_names)
+        imported.payload["expected_tags"] = expected_names
+        imported.api_calls.append(
+            f"template_import_verified before={len(before_names)} "
+            f"after={len(after_names)} new={imported.objects_created}"
+        )
+        return self._finalize_tag_data_type_result(
+            imported,
+            self._verify_tag_data_types(tags_collection, tag_items),
+        )
+
     def _import_tags_as_table(
         self, hmi_software, xml_path: str, sha256: str,
     ) -> ClassicStepResult:
@@ -971,18 +1282,42 @@ class ClassicOpennessExecutor:
             tag_count = self._count_xml_elements_from_file(xml_path, "Tag")
             tag_names = self._extract_names_from_xml_file(xml_path, "Tag")
 
-            import_opts = self._make_import_options()
-            if import_opts is None:
-                raise RuntimeError("ImportOptions.Override 不可用，禁止使用空选项替代")
-
             file_info = self._make_file_info(xml_path)
             tag_folder = hmi_software.TagFolder
-            imported = tag_folder.TagTables.Import(file_info, import_opts)
+            tag_tables = tag_folder.TagTables
+
+            resolution_overload = ClassicOpennessExecutor.resolve_import_option_from_overload(
+                tag_tables, preferred="Override",
+            )
+            if resolution_overload["ok"]:
+                result.api_calls.append(
+                    f"resolve_import_option_from_overload(TagTables): "
+                    f"source={resolution_overload['source']}, "
+                    f"selected={resolution_overload['selected']}, "
+                    f"available={resolution_overload['available']}"
+                )
+                try:
+                    tag_tables.Import(file_info, resolution_overload["value"])
+                except Exception:
+                    ClassicOpennessExecutor.invoke_tag_composition_import(
+                        tag_tables, xml_path, resolution_overload,
+                    )
+            else:
+                import_opts = self._make_import_options()
+                if import_opts is None:
+                    raise RuntimeError(
+                        "ImportOptions.Override 不可用，且无法从 "
+                        "TagFolder.TagTables.Import 重载解析导入选项。"
+                        f"overload_error={resolution_overload.get('error')}; "
+                        f"available={resolution_overload.get('available')}; "
+                        f"diagnostics={resolution_overload.get('diagnostics')}"
+                    )
+                tag_tables.Import(file_info, import_opts)
 
             result.objects_created = tag_count
             result.success = True
             result.api_calls.append(
-                f"TagFolder.TagTables.Import(FileInfo, ImportOptions.Override) "
+                f"TagFolder.TagTables.Import(FileInfo, ImportOptions) "
                 f"→ {tag_count} tags: {tag_names} [sha256={sha256[:16]}...]"
             )
 
@@ -1468,6 +1803,15 @@ class ClassicOpennessExecutor:
 
                 tags_collection.Import(file_info, import_opts)
 
+                # V5.5R8: Import 后通过 API 修正 DataType
+                dt_corrected = self._correct_tag_data_types_after_import(
+                    tags_collection, tag_items,
+                )
+                if dt_corrected:
+                    result.api_calls.append(
+                        f"V5.5R8 DataType corrected: {dt_corrected} tags"
+                    )
+
                 after_tags = enumerate_tag_names(tags_collection)
                 new_tags = [t for t in after_tags if t not in before_tags]
 
@@ -1499,6 +1843,14 @@ class ClassicOpennessExecutor:
 
                 if has_single_arg:
                     tags_collection.Import(file_info)
+                    # V5.5R8: Import 后通过 API 修正 DataType
+                    dt_corrected = self._correct_tag_data_types_after_import(
+                        tags_collection, tag_items,
+                    )
+                    if dt_corrected:
+                        result.api_calls.append(
+                            f"V5.5R8 DataType corrected: {dt_corrected} tags"
+                        )
                     after_tags = enumerate_tag_names(tags_collection)
                     new_tags = [t for t in after_tags if t not in before_tags]
                     result.objects_created = len(new_tags) if new_tags else tag_count
@@ -1653,6 +2005,7 @@ class ClassicOpennessExecutor:
                 len(existing_tags), len(tag_items),
             )
 
+            unchanged_count = 0
             for item in tag_items:
                 name = str(item.get("name", "")).strip()
                 if not name:
@@ -1669,25 +2022,29 @@ class ClassicOpennessExecutor:
                     except Exception:
                         pass
 
-                    if existing_dt == data_type:
+                    if _hmi_data_types_equal(existing_dt, data_type):
                         # 一致 → 跳过
+                        unchanged_count += 1
                         result.api_calls.append(f"UPSERT_SKIP: {name}")
                         continue
                     else:
-                        # 不一致 → 更新
-                        try:
-                            existing.DataType = data_type
+                        # 不一致 → 更新 (V5.5R10: Reflection setter for enum safety)
+                        _updated, _actual_dt = _set_hmi_tag_data_type(existing, data_type)
+                        if _updated:
                             result.objects_updated += 1
                             result.api_calls.append(
                                 f"UPSERT_UPDATE: {name} ({existing_dt}→{data_type})"
                             )
-                        except Exception as exc:
+                        else:
                             result.diagnostics.append(Diagnostic(
                                 code=DiagnosticCodes.IMPORT_TIA_EXCEPTION,
                                 severity=DiagnosticSeverity.WARNING,
                                 phase="P30_TAG_TABLES_AND_TAGS",
                                 object_name=name,
-                                message=f"UPSERT 更新变量 '{name}' 失败: {exc}",
+                                message=(
+                                    f"UPSERT 更新变量 '{name}' 类型未持久化: "
+                                    f"expected={data_type}, actual={_actual_dt}"
+                                ),
                             ))
                         continue
                 else:
@@ -1716,8 +2073,21 @@ class ClassicOpennessExecutor:
                         result.api_calls.append(f"UPSERT_FAIL (no Create method on tags_collection): {name}")
                         continue
                     try:
-                        new_tag = tags_collection.Create(name, data_type)
+                        # V5.5R9: 单参数 Create(name)，DataType 通过 setter 设置
+                        new_tag = tags_collection.Create(name)
                         result.objects_created += 1
+                        dt_ok, actual_dt = _set_hmi_tag_data_type(new_tag, data_type)
+                        if not dt_ok:
+                            result.diagnostics.append(Diagnostic(
+                                code=DiagnosticCodes.IMPORT_TIA_EXCEPTION,
+                                severity=DiagnosticSeverity.WARNING,
+                                phase="P30_TAG_TABLES_AND_TAGS",
+                                object_name=name,
+                                message=(
+                                    f"UPSERT 创建变量 '{name}' 后类型未持久化: "
+                                    f"expected={data_type}, actual={actual_dt}"
+                                ),
+                            ))
                         # 设置地址（如有）
                         addr = str(item.get("address", "")).strip()
                         if addr:
@@ -1732,7 +2102,7 @@ class ClassicOpennessExecutor:
                                 new_tag.Connection = conn
                             except Exception:
                                 pass
-                        result.api_calls.append(f"UPSERT_CREATE: {name}")
+                        result.api_calls.append(f"UPSERT_CREATE: {name} ({data_type})")
                     except Exception as exc:
                         # 检测 AttributeError 特殊处理 → 结构化诊断
                         if isinstance(exc, AttributeError) and "Create" in str(exc):
@@ -1788,6 +2158,7 @@ class ClassicOpennessExecutor:
             result.success = (
                 result.objects_created > 0
                 or result.objects_updated > 0
+                or unchanged_count > 0
             )
             if not tag_items:
                 result.success = True
@@ -1852,8 +2223,12 @@ class ClassicOpennessExecutor:
             return set()
 
     # ------------------------------------------------------------------
-    # V5.0: create_hmi_tags_via_api — 通过 Create 方法逐变量创建
-    # (EXPERIMENTAL — 不在主流程中调用，仅供高级用例手动使用)
+    # ------------------------------------------------------------------
+    # V5.5R9: create_hmi_tags_via_api — 通过 Create 方法逐变量创建（主路径）
+    # XML Import 无法在 XML 中指定 DataType（元素属性被忽略，子元素被拒绝），
+    # Import 后 tag.DataType = value 也无法可靠持久化，
+    # 因此 Create API 成为唯一可靠的数据类型设置方式。
+    # 当 TagComposition 不支持 Create 时回退 XML Import。
     # ------------------------------------------------------------------
 
     def create_hmi_tags_via_api(
@@ -1861,11 +2236,17 @@ class ClassicOpennessExecutor:
         hmi_software,
         tag_items: list[dict],
     ) -> ClassicStepResult:
-        """[EXPERIMENTAL] 通过 DefaultTagTable.Tags.Create 方法逐变量创建 HMI Tags。
+        """V5.5R9: 通过 DefaultTagTable.Tags.Create 方法逐变量创建 HMI Tags（主路径）。
 
-        ⚠ 实验性方法 — 不在主流程中调用，仅供高级用例手动使用。
-        主流程应通过 import_hmi_tags_safe / import_tags_to_default_table
-        的 XML Import 路径导入变量。
+        XML Import 路径无法可靠设置 HMI 变量的 DataType：
+          - 元素属性 DataType="Bool" → TIA 忽略，默认 Int
+          - 子元素 <DataType>Bool</DataType> → Import 拒绝
+          - Import 后 tag.DataType = value → pythonnet 可能无法持久化
+        因此优先使用 TagComposition.Create(name, data_type) 创建变量，
+        Create 在创建时即指定正确类型，类型设置可靠。
+
+        当 TagComposition 不支持 Create 时（检测 TAG_CREATE_NOT_SUPPORTED），
+        调用方应回退到 import_hmi_tags_safe（XML Import 路径）。
 
         非 XML 路径: 不依赖 XML Import，直接通过 TIA API Create 方法
         创建变量。需要 TagComposition 支持 Create 方法。
@@ -1927,11 +2308,13 @@ class ClassicOpennessExecutor:
                 return result
 
             # Step 3: 遍历 tag_items，逐个 Create
-            existing_names: set[str] = set()
+            existing_tags: dict[str, Any] = {}
             try:
                 for tag in tags_collection:
                     try:
-                        existing_names.add(str(getattr(tag, "Name", "")))
+                        existing_name = str(getattr(tag, "Name", ""))
+                        if existing_name:
+                            existing_tags[existing_name] = tag
                     except Exception:
                         pass
             except Exception:
@@ -1939,10 +2322,13 @@ class ClassicOpennessExecutor:
 
             logger.info(
                 "create_hmi_tags_via_api: existing=%d, incoming=%d",
-                len(existing_names), len(tag_items),
+                len(existing_tags), len(tag_items),
             )
 
             created_count = 0
+            updated_count = 0
+            unchanged_count = 0
+            type_failed_count = 0
             for item in tag_items:
                 name = str(item.get("name", "")).strip()
                 if not name:
@@ -1950,13 +2336,66 @@ class ClassicOpennessExecutor:
 
                 data_type = str(item.get("data_type", "Bool")).strip()
 
-                if name in existing_names:
-                    result.api_calls.append(f"CREATE_API_SKIP (exists): {name}")
+                if name in existing_tags:
+                    existing_tag = existing_tags[name]
+                    try:
+                        actual_before = str(getattr(existing_tag, "DataType", ""))
+                    except Exception:
+                        actual_before = ""
+                    if _hmi_data_types_equal(actual_before, data_type):
+                        unchanged_count += 1
+                        result.api_calls.append(
+                            f"CREATE_API_SKIP (exists/type-ok): {name} ({actual_before})"
+                        )
+                        continue
+
+                    dt_ok, actual_after = _set_hmi_tag_data_type(existing_tag, data_type)
+                    if dt_ok:
+                        updated_count += 1
+                        result.api_calls.append(
+                            f"CREATE_API_UPDATE_TYPE: {name} ({actual_before}→{data_type})"
+                        )
+                    else:
+                        type_failed_count += 1
+                        result.diagnostics.append(Diagnostic(
+                            code=DiagnosticCodes.IMPORT_TIA_EXCEPTION,
+                            severity=DiagnosticSeverity.WARNING,
+                            phase="P30_TAG_TABLES_AND_TAGS",
+                            object_name=name,
+                            message=(
+                                f"已有 HMI 变量 '{name}' 类型修正未持久化: "
+                                f"expected={data_type}, actual={actual_after}"
+                            ),
+                        ))
                     continue
 
                 try:
-                    new_tag = tags_collection.Create(name, data_type)
+                    # V5.5R9: Create(name) 单参数 — TagComposition.Create
+                    # 可能只有 Create(string name) 一个重载，第二个参数
+                    # "Bool" 若被静默消费则类型成为 Int。
+                    # 先创建，再通过 DataType setter 修正。
+                    new_tag = tags_collection.Create(name)
                     created_count += 1
+
+                    # V5.5R10: DataType 属性可能是 enum 类型（如 HmiDataType）
+                    # 用 System.Reflection + Enum.Parse 作为通用方案
+                    _dt_set_ok, _actual_dt = _set_hmi_tag_data_type(new_tag, data_type)
+                    if not _dt_set_ok:
+                        type_failed_count += 1
+                        logger.warning(
+                            "V5.5R10 DataType not persisted for new tag %s: expected=%s actual=%s",
+                            name, data_type, _actual_dt,
+                        )
+                        result.diagnostics.append(Diagnostic(
+                            code=DiagnosticCodes.IMPORT_TIA_EXCEPTION,
+                            severity=DiagnosticSeverity.WARNING,
+                            phase="P30_TAG_TABLES_AND_TAGS",
+                            object_name=name,
+                            message=(
+                                f"新建 HMI 变量 '{name}' 类型未持久化: "
+                                f"expected={data_type}, actual={_actual_dt}"
+                            ),
+                        ))
 
                     # 设置连接（如有）
                     conn = str(item.get("connection", "")).strip()
@@ -1990,7 +2429,15 @@ class ClassicOpennessExecutor:
                     ))
 
             result.objects_created = created_count
-            result.success = created_count > 0
+            result.objects_updated = updated_count
+            result.success = (
+                type_failed_count == 0
+                and (
+                    created_count > 0
+                    or updated_count > 0
+                    or unchanged_count > 0
+                )
+            )
 
         except Exception as exc:
             result.diagnostics.append(Diagnostic(
@@ -2218,8 +2665,20 @@ class ClassicOpennessExecutor:
                     f"selected={resolution.get('selected', '?')}) "
                     f"→ before={len(before_tags)} after={len(after_tags)}"
                 )
-                return self._finalize_import_result(
+                # V5.5R7: Import 后通过 API 修正 DataType
+                dt_corrected = self._correct_tag_data_types_after_import(
+                    tags_collection, tag_items,
+                )
+                if dt_corrected:
+                    result.api_calls.append(
+                        f"V5.5R7 DataType corrected: {dt_corrected} tags"
+                    )
+                finalized = self._finalize_import_result(
                     result, before_tags, after_tags, expected_names,
+                )
+                return self._finalize_tag_data_type_result(
+                    finalized,
+                    self._verify_tag_data_types(tags_collection, tag_items),
                 )
             except Exception as exc:
                 logger.error("XML Import (all methods) failed: %s", exc)
@@ -2303,8 +2762,20 @@ class ClassicOpennessExecutor:
                     f"TagFolder.DefaultTagTable.Tags.Import(FileInfo) "
                     f"→ before={len(before_tags)} after={len(after_tags)}"
                 )
-                return self._finalize_import_result(
+                # V5.5R7: Import 后通过 API 修正 DataType
+                dt_corrected = self._correct_tag_data_types_after_import(
+                    tags_collection, tag_items,
+                )
+                if dt_corrected:
+                    result.api_calls.append(
+                        f"V5.5R7 DataType corrected: {dt_corrected} tags"
+                    )
+                finalized = self._finalize_import_result(
                     result, before_tags, after_tags, expected_names,
+                )
+                return self._finalize_tag_data_type_result(
+                    finalized,
+                    self._verify_tag_data_types(tags_collection, tag_items),
                 )
             except Exception as exc:
                 logger.error("Single-arg Import(FileInfo) failed: %s", exc)
@@ -2366,6 +2837,162 @@ class ClassicOpennessExecutor:
                 "确认 TagXmlBuilder XML 格式可被 TagComposition.Import 接受。"
             ),
         ))
+        return result
+
+    def _correct_tag_data_types_after_import(
+        self,
+        tags_collection,
+        tag_items: list[dict],
+    ) -> int:
+        """V5.5R10: Import 后通过 .NET Reflection API 修正 DataType。
+
+        TIA Portal 的 Hmi.Tag.TagComposition.Import 不接受 XML 中的 DataType
+        （元素属性被忽略，<DataType> 子元素导致 "invalid argument DataType"），
+        导入的变量全部默认 Int。
+
+        DataType 属性可能是 .NET enum (如 HmiDataType) 而非 string，
+        因此用 System.Reflection.PropertyInfo.SetValue + System.Enum.Parse
+        作为通用策略，不依赖 pythonnet 的隐式类型转换。
+
+        返回:
+            成功修正 DataType 的变量数量
+        """
+        if not tag_items:
+            return 0
+
+        expected_types: dict[str, str] = {}
+        for item in tag_items:
+            name = str(item.get("name", "")).strip()
+            if name:
+                from backend.variable_engine import normalize_data_type
+                raw = item.get("data_type") or item.get("datatype") or "Bool"
+                expected_types[name] = normalize_data_type(str(raw), fallback="Bool")
+
+        import logging
+        _log = logging.getLogger(__name__)
+
+        corrected = 0
+        for tag in tags_collection:
+            try:
+                name = str(getattr(tag, "Name", ""))
+            except Exception:
+                continue
+            if name not in expected_types:
+                continue
+            expected_dt = expected_types[name]
+            try:
+                current_dt = str(getattr(tag, "DataType", ""))
+            except Exception:
+                current_dt = ""
+            if _hmi_data_types_equal(current_dt, expected_dt):
+                continue
+
+            # V5.5R10: System.Reflection 通用 setter
+            # DataType 属性类型可能是 enum (HmiDataType) 或 string，
+            # pythonnet 的隐式转换在 enum 场景下必然失败
+            set_ok, actual_dt = _set_hmi_tag_data_type(tag, expected_dt)
+
+            # 读回验证
+            if set_ok:
+                if _hmi_data_types_equal(actual_dt, expected_dt):
+                    corrected += 1
+                    _log.info(
+                        "V5.5R10 DataType corrected: %s (%s → %s)",
+                        name, current_dt, expected_dt,
+                    )
+                else:
+                    _log.warning(
+                        "V5.5R10 DataType set did NOT persist: %s set=%s readback=%s",
+                        name, expected_dt, actual_dt,
+                    )
+            else:
+                _log.warning(
+                    "V5.5R10 DataType correction failed for %s: %s→%s",
+                    name, current_dt, expected_dt,
+                )
+
+        return corrected
+
+    def _verify_tag_data_types(
+        self,
+        tags_collection,
+        tag_items: list[dict] | None,
+    ) -> list[dict]:
+        """Read back imported HMI tag DataType values and report mismatches."""
+        if not tag_items:
+            return []
+
+        expected_types: dict[str, str] = {}
+        for item in tag_items:
+            name = str(item.get("name", "")).strip()
+            if not name:
+                continue
+            from backend.variable_engine import normalize_data_type
+            raw = item.get("data_type") or item.get("datatype") or "Bool"
+            expected_types[name] = normalize_data_type(str(raw), fallback="Bool")
+
+        mismatches: list[dict] = []
+        seen: set[str] = set()
+        for tag in tags_collection:
+            try:
+                name = str(getattr(tag, "Name", ""))
+            except Exception:
+                continue
+            if name not in expected_types:
+                continue
+            seen.add(name)
+            expected_dt = expected_types[name]
+            try:
+                actual_dt = str(getattr(tag, "DataType", ""))
+            except Exception:
+                actual_dt = ""
+            if not _hmi_data_types_equal(actual_dt, expected_dt):
+                mismatches.append({
+                    "name": name,
+                    "expected": expected_dt,
+                    "actual": actual_dt,
+                })
+
+        for name, expected_dt in expected_types.items():
+            if name not in seen:
+                mismatches.append({
+                    "name": name,
+                    "expected": expected_dt,
+                    "actual": "<missing>",
+                })
+
+        return mismatches
+
+    def _finalize_tag_data_type_result(
+        self,
+        result: "ClassicStepResult",
+        mismatches: list[dict],
+    ) -> "ClassicStepResult":
+        """Turn DataType readback mismatches into a visible sync failure."""
+        if not mismatches:
+            result.api_calls.append("DataType readback verified")
+            return result
+
+        result.success = False
+        result.diagnostics.append(Diagnostic(
+            code=DiagnosticCodes.IMPORT_TIA_EXCEPTION,
+            severity=DiagnosticSeverity.ERROR,
+            phase="P30_TAG_TABLES_AND_TAGS",
+            message=(
+                "HMI 变量已导入，但 DataType 读回与期望不一致: "
+                f"{mismatches}"
+            ),
+            details={
+                "mismatches": mismatches,
+                "hint": (
+                    "如果 actual 仍为 Int，说明当前 HMI Tag XML 没有被 TIA "
+                    "按类型导入，且 Openness 后修正 DataType 未持久化。"
+                    "请用 TIA 手工导出一个真实 Bool HMI Tag XML 作为模板。"
+                ),
+            },
+        ))
+        result.payload = getattr(result, "payload", {}) or {}
+        result.payload["data_type_mismatches"] = mismatches
         return result
 
     def _finalize_import_result(

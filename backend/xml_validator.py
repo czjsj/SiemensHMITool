@@ -374,9 +374,13 @@ def validate_xml_class_for_import_target(xml_path: str, target_kind: str):
     with open(xml_path, "r", encoding="utf-8-sig", errors="ignore") as f:
         xml_content = f.read()
 
-    def _local(tag: str) -> str:
+    def _qname(tag: str) -> str:
         if "}" in tag:
             tag = tag.rsplit("}", 1)[-1]
+        return tag
+
+    def _local(tag: str) -> str:
+        tag = _qname(tag)
         if "." in tag:
             tag = tag.rsplit(".", 1)[-1]
         return tag
@@ -611,9 +615,13 @@ def validate_for_import_target(xml_path: str, target: str = "hmi_tags"):
         result.errors.append(f"XML 解析失败: {e}")
         return result
 
-    def _local(tag: str) -> str:
+    def _qname(tag: str) -> str:
         if "}" in tag:
             tag = tag.rsplit("}", 1)[-1]
+        return tag
+
+    def _local(tag: str) -> str:
+        tag = _qname(tag)
         if "." in tag:
             tag = tag.rsplit(".", 1)[-1]
         return tag
@@ -702,9 +710,13 @@ def detect_hmi_tag_xml_kind(xml_path: str) -> str:
     except ET.ParseError:
         return "unknown"
 
-    def _local(tag: str) -> str:
+    def _qname(tag: str) -> str:
         if "}" in tag:
             tag = tag.rsplit("}", 1)[-1]
+        return tag
+
+    def _local(tag: str) -> str:
+        tag = _qname(tag)
         if "." in tag:
             tag = tag.rsplit(".", 1)[-1]
         return tag
@@ -714,23 +726,33 @@ def detect_hmi_tag_xml_kind(xml_path: str) -> str:
     found_sw_tag = False
 
     for elem in root.iter():
+        qname = _qname(elem.tag)
         local = _local(elem.tag)
         cls = elem.get("Class", "")
 
         # Check TagTable before Tag (Tag is a substring of TagTable)
-        if "Hmi.Tag.TagTable" in cls:
+        if (
+            "Hmi.Tag.TagTable" in cls
+            or qname == "Hmi.Tag.TagTable"
+            or qname.endswith(".TagTable")
+        ):
             found_tag_table = True
-        elif "Hmi.Tag.Tag" in cls:
+        elif (
+            "Hmi.Tag.Tag" in cls
+            or qname == "Hmi.Tag.Tag"
+            or (qname.endswith(".Tag") and not qname.startswith("SW."))
+        ):
             found_individual_tag = True
 
-        if local == "SW.Tag":
+        if qname == "SW.Tag":
             found_sw_tag = True
 
-    # Return per priority: individual > table > plc > unknown
-    if found_individual_tag:
-        return "individual_hmi_tag"
+    # Return per priority: table > individual > plc > unknown.
+    # A full tag table normally contains individual Tag child objects.
     if found_tag_table:
         return "hmi_tag_table"
+    if found_individual_tag:
+        return "individual_hmi_tag"
     if found_sw_tag:
         return "plc_tag"
 
@@ -741,6 +763,10 @@ def detect_hmi_tag_xml_kind(xml_path: str) -> str:
 
     if re.search(r'<SW\.Tag\b', content):
         return "plc_tag"
+    if re.search(r'<(?:\w+:)?Hmi\.Tag\.TagTable\b', content):
+        return "hmi_tag_table"
+    if re.search(r'<(?:\w+:)?Hmi\.Tag\.Tag\b', content):
+        return "individual_hmi_tag"
     if re.search(r'Class="[^"]*Hmi\.Tag\.TagTable[^"]*"', content):
         return "hmi_tag_table"
     if re.search(r'Class="[^"]*Hmi\.Tag\.Tag(?!Table)[^"]*"', content):
