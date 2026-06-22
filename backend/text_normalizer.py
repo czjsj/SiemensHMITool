@@ -242,9 +242,9 @@ class TextNormalizer:
             if key in meta and isinstance(meta[key], str):
                 meta[key] = TextNormalizer.normalize(meta[key])
 
-        # 对象字段
+        # 对象字段（不清洗 id，避免与 validate_ir 去重冲突导致 ID 碰撞）
         for obj in ir.get("objects", []) or []:
-            for key in ("text", "label", "unit", "id"):
+            for key in ("text", "label", "unit"):
                 if key in obj and isinstance(obj[key], str):
                     obj[key] = TextNormalizer.normalize(obj[key])
 

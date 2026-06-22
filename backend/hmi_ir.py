@@ -114,8 +114,8 @@ def _min_h_gap(a: dict, b: dict) -> int:
 def _min_v_gap(prev_row: list[dict], next_row: list[dict]) -> int:
     types = {o.get("type") for o in prev_row + next_row}
     if "Button" in types:
-        return 22
-    return 18
+        return 24
+    return 24
 
 
 def _row_bounds(row: list[dict]) -> tuple[int, int, int, int]:

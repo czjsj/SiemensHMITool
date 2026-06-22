@@ -505,8 +505,8 @@ def _generate(ir: dict, tia_version: str, tmpl: dict) -> str:
         lines.append(f"{indent}</TextLists>")
 
     # 对象容器（ObjectList / ScreenItems）
-    # 注意：label/unit 已在 hmi_ir.validate_ir() 中展开为显式 Text 对象。
-    # 这里不再隐式生成 _lbl/_unit，否则导入到 TIA 后对象数会再次膨胀并产生重复文字。
+    # label/unit 通过 _label_lines/_unit_lines 生成为独立的 TextField 文字控件，
+    # 确保导入到 TIA 后画面上能看到标签和单位文字。
     lines.append(f"{indent}<{items_container}>")
     objects = ir.get("objects", []) or []
     if basic_mode:
@@ -517,6 +517,16 @@ def _generate(ir: dict, tia_version: str, tmpl: dict) -> str:
         builder = _DISPATCH.get(otype)
         if builder:
             lines.extend(_ind(indent + "  ", builder(o)))
+            # 为含 label 的对象生成左侧说明文字（IOField/SymbolicIOField/Indicator）
+            if otype in ("IOField", "SymbolicIOField", "Indicator"):
+                label_lines = _label_lines(o)
+                if label_lines:
+                    lines.extend(_ind(indent + "  ", label_lines))
+            # 为含 unit 的 IOField 生成右侧单位文字
+            if otype == "IOField":
+                unit_lines = _unit_lines(o)
+                if unit_lines:
+                    lines.extend(_ind(indent + "  ", unit_lines))
     lines.append(f"{indent}</{items_container}>")
 
     # Screen 闭合

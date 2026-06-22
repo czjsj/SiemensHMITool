@@ -16,9 +16,10 @@
   3. 名称前缀：TXT_ / BTN_ / IO_ / SIO_ / LMP_
 
 找不到模板控件时：
-  - 返回 warning
-  - 不强行拼复杂 XML
-  - 可选地复制同类型模板控件（谨慎，需保持 ID 唯一）
+  - 对于 Text 类型：若模板中完全不存在 TextField，则从零创建最小化 TextField 兜底，
+    确保文字控件（标题、标签、说明文字）不会丢失。
+  - 对于其他类型：复制同类型模板控件（谨慎，需保持 ID 唯一）。
+  - 仍找不到时返回 warning，不强行拼复杂 XML。
 """
 import copy
 import uuid
@@ -196,9 +197,10 @@ def generate_from_template_xml(
         if matched is None:
             # 模板控件数量不足时，按同类型控件克隆一个。
             # 例如 IR 有启动/停止/复位 3 个按钮，但模板只有 1 个按钮，
-            # 旧逻辑会反复覆盖同一个按钮，最终只剩最后一个“复位”。
+            # 旧逻辑会反复覆盖同一个按钮，最终只剩最后一个"复位"。
+            # 对于 Text 类型，若模板完全无 TextField，则从零创建兜底。
             matched = _clone_matching_template_item(
-                obj, type_map, parent_map, used_ids, warnings
+                obj, type_map, parent_map, used_ids, warnings, screen_node
             )
 
         if matched is None:
@@ -1169,14 +1171,103 @@ def _clone_template_item(item: ET.Element, new_name: str, used_ids: set) -> ET.E
         return None
 
 
+def _create_minimal_text_field(obj: dict, used_ids: set, screen_node: ET.Element = None) -> ET.Element | None:
+    """当模板中不存在任何 TextField 元素时，从零创建一个最小化 TextField 控件。
+
+    避免 IR 中的 Text 对象因模板无 TextField 而被静默跳过，
+    导致最终导入的画面缺少文字控件（标题、标签、说明文字等）。
+
+    结构参考 TIA V16 Comfort 导出的 TextField：
+      <Hmi.Screen.TextField ID="...">
+        <AttributeList>
+          <ObjectName>...</ObjectName>
+          <Left>...</Left><Top>...</Top><Width>...</Width><Height>...</Height>
+          <FontSize>...</FontSize><Bold>...</Bold><ForeColor>...</ForeColor>
+        </AttributeList>
+        <MultilingualText CompositionName="Text">
+          <ObjectList>
+            <MultilingualTextItem>
+              <AttributeList>
+                <Culture>zh-CN</Culture>
+                <Text><body><p>...</p></body></Text>
+              </AttributeList>
+            </MultilingualTextItem>
+          </ObjectList>
+        </MultilingualText>
+      </Hmi.Screen.TextField>
+    """
+    try:
+        oid = obj.get("id") or f"TXT_{len(used_ids) + 1}"
+        x = int(obj.get("x", 0))
+        y = int(obj.get("y", 0))
+        w = int(obj.get("width", 200))
+        h = int(obj.get("height", 40))
+        text = sanitize_tia_text(str(obj.get("text", "")))
+        font_size = str(int(obj.get("font_size", 18)))
+        bold = "true" if obj.get("bold") else "false"
+        color = _hex_to_rgb_str(obj.get("color", "#E6EDF3"))
+
+        tf_id = _next_simatic_id(used_ids)
+        ml_id = _next_simatic_id(used_ids)
+        mli_id = _next_simatic_id(used_ids)
+
+        tf = ET.Element("Hmi.Screen.TextField", {"ID": tf_id})
+
+        attr = ET.SubElement(tf, "AttributeList")
+        ET.SubElement(attr, "ObjectName").text = oid
+        ET.SubElement(attr, "Left").text = str(x)
+        ET.SubElement(attr, "Top").text = str(y)
+        ET.SubElement(attr, "Width").text = str(w)
+        ET.SubElement(attr, "Height").text = str(h)
+        ET.SubElement(attr, "FontSize").text = font_size
+        ET.SubElement(attr, "Bold").text = bold
+        ET.SubElement(attr, "ForeColor").text = color
+        ET.SubElement(attr, "HorizontalAlignment").text = "Left"
+        ET.SubElement(attr, "VerticalAlignment").text = "Middle"
+
+        ml = ET.SubElement(tf, "MultilingualText", {"ID": ml_id, "CompositionName": "Text"})
+        ol = ET.SubElement(ml, "ObjectList")
+        mli = ET.SubElement(ol, "MultilingualTextItem", {"ID": mli_id, "CompositionName": "Items"})
+        mli_attr = ET.SubElement(mli, "AttributeList")
+        ET.SubElement(mli_attr, "Culture").text = "zh-CN"
+        text_node = ET.SubElement(mli_attr, "Text")
+        body = ET.SubElement(text_node, "body")
+        p = ET.SubElement(body, "p")
+        p.text = text or " "
+
+        return tf
+    except Exception:
+        return None
+
+
+def _find_screen_items_container(screen_node: ET.Element) -> ET.Element | None:
+    """查找 Screen 节点下容纳控件的 ObjectList 容器。
+
+    TIA V16 格式：<Screen><ObjectList CompositionName="ScreenItems">...</ObjectList></Screen>
+    也兼容无 CompositionName 的 ObjectList 或直接在 Screen 下添加。
+    """
+    if screen_node is None:
+        return None
+    for child in screen_node:
+        if _local_tag(child) == "ObjectList":
+            return child
+    # 如果没有 ObjectList，创建一个
+    return ET.SubElement(screen_node, "ObjectList", {"CompositionName": "ScreenItems"})
+
+
 def _clone_matching_template_item(
     obj: dict,
     type_map: dict,
     parent_map: dict,
     used_ids: set,
     warnings: list,
+    screen_node: ET.Element = None,
 ) -> tuple | None:
-    """当同类型模板控件数量不足时，复制一个同类型控件。"""
+    """当同类型模板控件数量不足时，复制一个同类型控件。
+
+    对于 Text 类型，若模板中完全不存在 TextField，则从零创建最小化 TextField 兜底，
+    避免文字控件被静默跳过导致画面缺失文字。
+    """
     otype = obj.get("type", "")
     target_xml_tag = _IR_TYPE_TO_XML_TAG.get(otype)
     if not target_xml_tag:
@@ -1184,6 +1275,19 @@ def _clone_matching_template_item(
 
     candidates = type_map.get(target_xml_tag, [])
     if not candidates:
+        # Text 类型兜底：模板无 TextField 时从零创建
+        if otype == "Text":
+            tf = _create_minimal_text_field(obj, used_ids, screen_node)
+            if tf is not None:
+                container = _find_screen_items_container(screen_node)
+                if container is not None:
+                    container.append(tf)
+                    parent_map[tf] = container
+                    oid = obj.get("id") or f"TXT_{len(used_ids)}"
+                    warnings.append(
+                        f"模板中无 TextField 控件，已为文字对象 '{oid}' 创建最小化 TextField 兜底。"
+                    )
+                    return tf, oid
         return None
 
     source, source_name = candidates[0]
