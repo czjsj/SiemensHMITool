@@ -177,6 +177,17 @@ def generate_from_template_xml(
     type_map = _build_item_type_map(template_items)
     parent_map = _build_parent_map(root)
     used_ids = _collect_existing_ids(root)
+    try:
+        from backend.template.xml_rewrite_rules import collect_control_tag_references
+    except Exception:
+        collect_control_tag_references = None
+
+    template_tag_refs_by_name: dict[str, set[str]] = {}
+    if collect_control_tag_references is not None:
+        for elem in template_items:
+            name = _get_item_name(elem)
+            if name:
+                template_tag_refs_by_name[name] = collect_control_tag_references(elem)
 
     used_template_ids = set()
     used_template_names = set()  # 按名称追踪已使用的控件，避免多个 IR 对象覆盖同一个模板控件
@@ -218,10 +229,35 @@ def generate_from_template_xml(
     for key, (elem, _) in item_map.items():
         if key not in used_template_ids:
             name = _get_item_name(elem) or "(unnamed)"
-            warnings.append(f"模板控件 '{name}' 未被任何 IR 对象引用，保留原样")
+            refs = template_tag_refs_by_name.get(key, set())
+            if refs and options.get("remove_unused_bound_template_items", True):
+                parent = parent_map.get(elem)
+                if parent is not None:
+                    parent.remove(elem)
+                    warnings.append(
+                        f"模板控件 '{name}' 未被任何 IR 对象引用且含模板变量 {sorted(refs)}，已移除以避免旧变量泄漏。"
+                    )
+                else:
+                    warnings.append(
+                        f"模板控件 '{name}' 未被任何 IR 对象引用且含模板变量 {sorted(refs)}，但未找到父节点，保留原样。"
+                    )
+            else:
+                warnings.append(f"模板控件 '{name}' 未被任何 IR 对象引用，保留原样")
 
     # 4. 序列化回 XML 字符串
     new_xml = _element_to_string(root, template_xml)
+    if collect_control_tag_references is not None:
+        target_tags = _collect_target_tags(ir)
+        all_template_tags = set()
+        for refs in template_tag_refs_by_name.values():
+            all_template_tags.update(refs)
+        forbidden = all_template_tags - target_tags
+        remaining = collect_control_tag_references(root) & forbidden
+        if remaining:
+            warnings.append(
+                "生成 XML 中仍发现模板变量引用，建议检查模板或 IR 绑定: "
+                + ", ".join(sorted(remaining))
+            )
     return new_xml, warnings
 
 
@@ -349,6 +385,42 @@ def _scale_objects_to_size(objects: list, source_size: tuple[int, int], target_s
         f"按比例映射到模板尺寸 {tw}x{th}。"
     )
     return scaled
+
+
+def _collect_target_tags(ir: dict) -> set[str]:
+    """Collect all tag names that are valid targets for the generated screen."""
+    tags: set[str] = set()
+    for tag in ir.get("tags", []) or []:
+        if isinstance(tag, dict):
+            name = str(tag.get("name", "")).strip()
+            if name:
+                tags.add(name)
+
+    for obj in ir.get("objects", []) or []:
+        for key in ("process_tag", "tag_binding"):
+            value = str(obj.get(key, "")).strip() if isinstance(obj, dict) else ""
+            if value:
+                tags.add(value)
+        binding = obj.get("binding") if isinstance(obj, dict) else None
+        if isinstance(binding, dict):
+            value = str(binding.get("tag", "")).strip()
+            if value:
+                tags.add(value)
+        for binding_item in obj.get("bindings", []) if isinstance(obj, dict) else []:
+            if isinstance(binding_item, dict):
+                for key in ("tag", "source_tag"):
+                    value = str(binding_item.get(key, "")).strip()
+                    if value:
+                        tags.add(value)
+        for event in obj.get("events", []) if isinstance(obj, dict) else []:
+            if not isinstance(event, dict):
+                continue
+            for action in event.get("actions", []) or []:
+                if isinstance(action, dict):
+                    value = str(action.get("tag", "")).strip()
+                    if value:
+                        tags.add(value)
+    return tags
 
 # ========================================================================
 # Screen 节点操作
@@ -628,6 +700,12 @@ def _apply_object_to_item(obj: dict, item: ET.Element, warnings: list):
     """将 IR 对象的属性安全地应用到模板控件。"""
     oid = obj.get("id", "")
     otype = obj.get("type", "")
+    template_tag_refs: set[str] = set()
+    try:
+        from backend.template.xml_rewrite_rules import collect_control_tag_references
+        template_tag_refs = collect_control_tag_references(item)
+    except Exception:
+        template_tag_refs = set()
 
     # 名称
     if oid:
@@ -649,7 +727,14 @@ def _apply_object_to_item(obj: dict, item: ET.Element, warnings: list):
     # 变量连接
     tag = obj.get("process_tag")
     if tag:
-        _set_process_tag(item, tag)
+        rebound = 0
+        try:
+            from backend.template.xml_rewrite_rules import rebind_control_tag_references
+            rebound = rebind_control_tag_references(item, tag, template_tag_refs)
+        except Exception as e:
+            warnings.append(f"控件 '{oid}' 变量重绑定失败，尝试旧方式写入 ProcessTag: {e}")
+        if rebound <= 0:
+            _set_process_tag(item, tag)
 
     # 颜色（Button: background_color; Indicator: color_on/color_off; Text: color）
     if otype == "Button":
@@ -1046,15 +1131,14 @@ def generate_from_template_v4(
     from backend.template.prototype_registry import PrototypeRegistry, PrototypeNotFoundError
     from backend.template.xml_rewrite_rules import (
         clone_prototype_node,
-        replace_control_name,
         replace_control_text,
         replace_geometry,
-        replace_all_tag_references,
+        collect_control_tag_references,
+        rebind_control_tag_references,
         ensure_no_placeholder_tags,
-        assign_unique_control_ids,
         assert_no_template_tag_leak,
     )
-    from backend.template.xml_utils import collect_existing_ids, deepcopy_xml_node
+    from backend.template.xml_utils import collect_existing_ids
     from backend.template.template_binding_validator import validate_generated_screen_xml
     from backend.variable_engine import VariableEngine
     from backend.tag_binding_normalizer import normalize_legacy_tag_bindings
@@ -1144,6 +1228,8 @@ def generate_from_template_v4(
         w, h = int(w), int(h)
     except Exception:
         w, h = 1280, 800
+    tag_names = [t.name for t in project.tags]
+    target_tag_names = set(tag_names)
 
     # Generate controls
     all_generated_xml: list[str] = []
@@ -1179,17 +1265,19 @@ def generate_from_template_v4(
             if item_text:
                 replace_control_text(cloned, item_text)
 
-            # Replace tag references
-            old_tags = [t for t in template_tags if t in proto.replaceable_tags or "Template_" in t]
-            if old_tags and tag_binding:
-                replaced = replace_all_tag_references(cloned, old_tags, tag_binding)
+            # Replace tag references. The clone may contain variable references in
+            # ProcessValue, events, dynamic bindings, OpenLink parameters or scripts.
+            # Every copied template reference must be rebound to this item's tag.
+            old_tags = sorted(collect_control_tag_references(cloned) | set(proto.replaceable_tags))
+            if tag_binding:
+                replaced = rebind_control_tag_references(cloned, tag_binding, old_tags)
                 if replaced == 0 and old_tags:
-                    # Try broader replacement
-                    for ot in old_tags:
-                        replace_all_tag_references(cloned, [ot], tag_binding)
+                    warnings.append(
+                        f"控件 '{item_id}' 未找到可重绑定的模板变量位置，目标变量为 '{tag_binding}'。"
+                    )
 
             # Verify no placeholder remains
-            remaining = ensure_no_placeholder_tags(cloned, list(template_tags))
+            remaining = ensure_no_placeholder_tags(cloned, sorted(template_tags - set(tag_names)))
             if remaining:
                 warnings.append(f"控件 '{item_id}' 残留模板变量: {remaining}")
 
@@ -1222,9 +1310,8 @@ def generate_from_template_v4(
     screen_xml = "\n".join(screen_xml_parts)
 
     # ---- Step 5: Pre-import validation ----
-    tag_names = [t.name for t in project.tags]
     item_ids = [item.id for screen in project.screens for item in screen.items]
-    forbidden_placeholders = [t for t in template_tags if "Template_" in t]
+    forbidden_placeholders = sorted(t for t in template_tags if t not in target_tag_names)
 
     # V5.5: Hard block — template tag leak detection before pre-import validation
     if forbidden_placeholders:

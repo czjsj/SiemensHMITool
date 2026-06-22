@@ -8,6 +8,7 @@ XML 重写规则 — 定义 RewritePlan 和核心替换函数。
 from __future__ import annotations
 
 import copy
+import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Any
@@ -188,6 +189,191 @@ def replace_all_tag_references(
                                 replaced_count += 1
 
     return replaced_count
+
+
+_DIRECT_TAG_VALUE_NODES = {
+    "tagname", "variablename", "processtag", "processvalue",
+    "hmitag", "variable", "tag", "connectiontag", "valuetag",
+}
+
+_TAG_PARAMETER_NAMES = {
+    "tag", "tagname", "processtag", "processvalue", "variable",
+    "variablename", "connectiontag", "valuetag", "hmitag",
+}
+
+_TAG_ATTRIBUTES = ("Tag", "tag", "TagName", "VariableName", "ProcessTag", "ProcessValue", "HmiTag")
+
+
+def rebind_control_tag_references(
+    node: ET.Element,
+    new_tag: str,
+    old_tags: list[str] | set[str] | None = None,
+) -> int:
+    """Bind every tag reference inside one cloned control to ``new_tag``.
+
+    Template controls are copied from a real TIA export, so their XML may keep
+    tag references in several shapes: normal ProcessValue nodes, function-list
+    parameters, OpenLink nodes, dynamic bindings and SmartTags scripts.  This
+    helper rewrites the tag-bearing contexts only; display text and object names
+    are intentionally ignored.
+
+    If ``old_tags`` is provided, expression/script replacements are restricted
+    to those names.  Direct tag-bearing fields are still rebound to ``new_tag``
+    because their presence means the copied control already has a tag slot.
+    """
+    if not new_tag:
+        return 0
+
+    old_set = {str(t).strip() for t in (old_tags or []) if str(t).strip()}
+    replaced_count = 0
+
+    for elem in node.iter():
+        elem_local = local_name(elem.tag).lower()
+
+        if elem_local in _DIRECT_TAG_VALUE_NODES and elem.text and elem.text.strip():
+            elem.text = new_tag
+            replaced_count += 1
+
+        if _is_tag_parameter(elem) and elem.text and elem.text.strip():
+            elem.text = new_tag
+            replaced_count += 1
+
+        if _is_openlink_tag_ref(elem):
+            for name_elem in elem:
+                if local_name(name_elem.tag).lower() == "name" and name_elem.text and name_elem.text.strip():
+                    name_elem.text = new_tag
+                    replaced_count += 1
+
+        for attr_name in _TAG_ATTRIBUTES:
+            if attr_name in elem.attrib and str(elem.attrib[attr_name]).strip():
+                elem.attrib[attr_name] = new_tag
+                replaced_count += 1
+
+        if elem_local == "expression" and elem.text and elem.text.strip():
+            new_text, changed = _replace_expression_tag_refs(elem.text, new_tag, old_set)
+            if changed:
+                elem.text = new_text
+                replaced_count += 1
+
+        if elem.text and "SmartTags" in elem.text:
+            new_text, changed = _replace_smarttags_refs(elem.text, new_tag, old_set)
+            if changed:
+                elem.text = new_text
+                replaced_count += 1
+
+    return replaced_count
+
+
+def collect_control_tag_references(node: ET.Element) -> set[str]:
+    """Collect tag names from tag-bearing contexts in a control XML node."""
+    refs: set[str] = set()
+    for elem in node.iter():
+        elem_local = local_name(elem.tag).lower()
+
+        if elem_local in _DIRECT_TAG_VALUE_NODES and elem.text and elem.text.strip():
+            refs.add(elem.text.strip())
+
+        if _is_tag_parameter(elem) and elem.text and elem.text.strip():
+            refs.add(elem.text.strip())
+
+        if _is_openlink_tag_ref(elem):
+            for name_elem in elem:
+                if local_name(name_elem.tag).lower() == "name" and name_elem.text and name_elem.text.strip():
+                    refs.add(name_elem.text.strip())
+
+        for attr_name in _TAG_ATTRIBUTES:
+            value = elem.attrib.get(attr_name)
+            if value and str(value).strip():
+                refs.add(str(value).strip())
+
+        if elem.text and "SmartTags" in elem.text:
+            refs.update(_extract_smarttags_names(elem.text))
+
+        if elem_local == "expression" and elem.text and elem.text.strip():
+            refs.update(_extract_expression_tag_candidates(elem.text))
+
+    return refs
+
+
+def _is_tag_parameter(elem: ET.Element) -> bool:
+    param_name = elem.get("Name") or elem.get("name") or ""
+    return param_name.strip().lower() in _TAG_PARAMETER_NAMES
+
+
+def _is_openlink_tag_ref(elem: ET.Element) -> bool:
+    elem_local = local_name(elem.tag).lower()
+    return elem_local in {"value", "tag"} and elem.get("TargetID", "") == "@OpenLink"
+
+
+def _replace_expression_tag_refs(
+    text: str,
+    new_tag: str,
+    old_tags: set[str],
+) -> tuple[str, bool]:
+    stripped = text.strip()
+    if not old_tags:
+        if _looks_like_plain_tag(stripped):
+            return new_tag, True
+        return text, False
+
+    updated = text
+    for old in sorted(old_tags, key=len, reverse=True):
+        updated = _replace_identifier(updated, old, new_tag)
+    return updated, updated != text
+
+
+def _replace_smarttags_refs(
+    text: str,
+    new_tag: str,
+    old_tags: set[str],
+) -> tuple[str, bool]:
+    pattern = re.compile(r'(SmartTags\s*\(\s*["\'])([^"\']+)(["\']\s*\))', re.IGNORECASE)
+
+    def repl(match: re.Match) -> str:
+        current = match.group(2).strip()
+        if old_tags and current not in old_tags:
+            return match.group(0)
+        return f"{match.group(1)}{new_tag}{match.group(3)}"
+
+    updated = pattern.sub(repl, text)
+    return updated, updated != text
+
+
+def _extract_smarttags_names(text: str) -> set[str]:
+    pattern = re.compile(r'SmartTags\s*\(\s*["\']([^"\']+)["\']\s*\)', re.IGNORECASE)
+    return {m.group(1).strip() for m in pattern.finditer(text) if m.group(1).strip()}
+
+
+def _extract_expression_tag_candidates(text: str) -> set[str]:
+    keywords = {
+        "and", "or", "not", "true", "false", "if", "then", "else", "endif",
+        "smarttags", "abs", "min", "max", "round", "int", "real", "bool",
+    }
+    refs: set[str] = set()
+    for match in re.finditer(r'[A-Za-z_][A-Za-z0-9_.]*', text):
+        value = match.group(0).strip()
+        lower = value.lower()
+        if lower in keywords:
+            continue
+        if (
+            "_" in value
+            or "." in value
+            or value.startswith(("Template", "BTN", "STS", "LMP", "IO", "SIO", "MEM"))
+            or (value[:1].isupper() and len(value) > 1)
+        ):
+            refs.add(value)
+    return refs
+
+
+def _replace_identifier(text: str, old: str, new: str) -> str:
+    if not old:
+        return text
+    pattern = re.compile(rf'(?<![A-Za-z0-9_]){re.escape(old)}(?![A-Za-z0-9_])')
+    return pattern.sub(new, text)
+
+
+def _looks_like_plain_tag(value: str) -> bool:
+    return bool(re.fullmatch(r'[A-Za-z_][A-Za-z0-9_.]*', value))
 
 
 def ensure_no_placeholder_tags(node: ET.Element, placeholder_tags: list[str]) -> list[str]:
