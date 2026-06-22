@@ -87,7 +87,7 @@
         </span>
         <label class="check"><input type="checkbox" id="optShowThinking" checked><span class="box"></span>展示思考过程</label>
         <label class="check"><input type="checkbox" id="optStream" checked><span class="box"></span>流式输出</label>
-        <label class="check"><input type="checkbox" id="optReview"><span class="box"></span>视觉审查 (MiMo)</label>
+        <label class="check"><input type="checkbox" id="optReview"><span class="box"></span>视觉审查</label>
       </div>
 
       <div class="example-row">
@@ -117,15 +117,6 @@
 
       <!-- 输出页 -->
       <div class="tab-page active" data-page="output">
-        <div class="thinking-box collapsed" id="thinkingBox" style="display:none">
-          <div class="thinking-head" id="thinkingHead">
-            <span class="spin"></span>
-            <span>▸ 思考过程</span>
-            <span style="margin-left:auto;color:var(--text-muted)" id="thinkingToggle">展开</span>
-          </div>
-          <div class="thinking-body" id="thinkingBody"></div>
-        </div>
-
         <div class="pipeline-progress" id="pipelineProgress" style="display:none">
           <div class="pipeline-header">
             <span class="pipeline-title" id="pipelineTitle">视觉审查中…</span>
@@ -135,19 +126,32 @@
           <div class="review-result" id="reviewResult" style="display:none"></div>
         </div>
 
-        <div class="output-wrap">
-          <div class="output-toolbar">
-            <div class="left"><span>模型原始输出（画面 IR / JSON）</span></div>
-            <div class="right">
-              <button class="btn" id="btnBuild">生成 XML / 预览</button>
-              <button class="btn" id="btnCopyOut">复制</button>
-              <button class="btn" id="btnDownloadXml" disabled>下载 .xml</button>
+        <div class="output-split">
+          <div class="output-side output-side-left" id="thinkingSide" style="display:none">
+            <div class="side-head">
+              <span class="spin" id="thinkingSpin"></span>
+              <span>思考过程</span>
+              <span style="margin-left:auto;color:var(--text-muted);cursor:pointer" id="thinkingToggle">收起</span>
             </div>
+            <div class="thinking-body side-scroll" id="thinkingBody"></div>
           </div>
-          <div class="output-body" id="outputBody">
-            <div class="placeholder-center">
-              在左侧输入画面需求，点击「生成画面」。<br>
-              模型将输出规范化的画面 IR，随后可一键生成 SimaticML 并预览。
+
+          <div class="output-side output-side-right">
+            <div class="output-wrap">
+              <div class="output-toolbar">
+                <div class="left"><span>模型原始输出（画面 IR / JSON）</span></div>
+                <div class="right">
+                  <button class="btn" id="btnBuild">生成 XML / 预览</button>
+                  <button class="btn" id="btnCopyOut">复制</button>
+                  <button class="btn" id="btnDownloadXml" disabled>下载 .xml</button>
+                </div>
+              </div>
+              <div class="output-body side-scroll" id="outputBody">
+                <div class="placeholder-center">
+                  在左侧输入画面需求，点击「生成画面」。<br>
+                  模型将输出规范化的画面 IR，随后可一键生成 SimaticML 并预览。
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -463,25 +467,25 @@
       <h3 style="color:var(--accent);font-size:14px;margin:0 0 12px">视觉审查设置</h3>
       <div class="field">
         <label>审查模型选择</label>
-        <label class="check"><input type="checkbox" id="setForceMimo"><span class="box"></span>强制使用 MiMo 审查（不勾选时，主模型支持视觉则用主模型）</label>
-        <div class="hint-text">若主模型已勾选"支持图片视觉输入"，默认由主模型执行视觉审查；勾选此项则始终使用 MiMo。</div>
+        <label class="check"><input type="checkbox" id="setForceMimo"><span class="box"></span>强制使用备用模型审查（不勾选时，主模型支持视觉则用主模型）</label>
+        <div class="hint-text">若主模型已勾选"支持图片视觉输入"，默认由主模型执行视觉审查；勾选此项则始终使用备用模型。</div>
       </div>
       <div class="field">
         <label>开启视觉审查</label>
-        <label class="check"><input type="checkbox" id="setMimoEnabled"><span class="box"></span>启用 MiMo 视觉审查（主模型不支持视觉时作为回退）</label>
+        <label class="check"><input type="checkbox" id="setMimoEnabled"><span class="box"></span>启用视觉审查（主模型不支持视觉时作为回退）</label>
       </div>
       <div class="field">
-        <label>MiMo Base URL</label>
-        <input class="input" id="setMimoBaseUrl" placeholder="https://api.xiaomimimo.com/v1">
+        <label>备用审查 Base URL</label>
+        <input class="input" id="setMimoBaseUrl" placeholder="https://api.example.com/v1">
       </div>
       <div class="field">
-        <label>MiMo API Key</label>
-        <input class="input" id="setMimoApiKey" type="password" placeholder="mimo-...">
+        <label>备用审查 API Key</label>
+        <input class="input" id="setMimoApiKey" type="password" placeholder="sk-...">
         <div class="hint-text">仅保存在本机 config.yaml，不会上传。</div>
       </div>
       <div class="field">
-        <label>MiMo 模型名</label>
-        <input class="input" id="setMimoModel" placeholder="mimo-v2.5">
+        <label>备用审查模型名</label>
+        <input class="input" id="setMimoModel" placeholder="vision-model-v1">
       </div>
       <div class="field row">
         <div class="field" style="flex:1">

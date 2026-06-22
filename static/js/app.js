@@ -165,9 +165,9 @@ function syncSettingsFields() {
   const mimo = CONFIG.mimo || {};
   $("#setMimoEnabled").checked = !!mimo.enabled;
   $("#setForceMimo").checked = !!mimo.force_mimo_review;
-  $("#setMimoBaseUrl").value = mimo.base_url || "https://api.xiaomimimo.com/v1";
+  $("#setMimoBaseUrl").value = mimo.base_url || "https://api.example.com/v1";
   $("#setMimoApiKey").value = mimo.api_key || "";
-  $("#setMimoModel").value = mimo.model || "mimo-v2.5";
+  $("#setMimoModel").value = mimo.model || "vision-model-v1";
   $("#setMimoMaxIter").value = mimo.max_iterations || 3;
   $("#setMimoThreshold").value = mimo.review_pass_threshold || 70;
 }
@@ -219,10 +219,11 @@ function bindUI() {
   $("#btnDownloadXml").addEventListener("click", downloadXml);
 
   // 思考折叠
-  $("#thinkingHead").addEventListener("click", () => {
-    const box = $("#thinkingBox");
-    box.classList.toggle("collapsed");
-    $("#thinkingToggle").textContent = box.classList.contains("collapsed") ? "展开" : "收起";
+  $("#thinkingToggle").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const body = $("#thinkingBody");
+    body.classList.toggle("collapsed");
+    $("#thinkingToggle").textContent = body.classList.contains("collapsed") ? "展开" : "收起";
   });
 
   // 日志折叠
@@ -307,13 +308,13 @@ async function startGenerate() {
   LAST_BUILD = null;
 
   const out = $("#outputBody"); out.innerHTML = ""; out.textContent = "";
-  const thinkBox = $("#thinkingBox"), thinkBody = $("#thinkingBody");
+  const thinkSide = $("#thinkingSide"), thinkBody = $("#thinkingBody");
   const showThink = $("#optShowThinking").checked && $("#depthSelect").value !== "关闭";
   thinkBody.textContent = "";
-  thinkBox.style.display = showThink ? "block" : "none";
-  thinkBox.classList.remove("collapsed");
+  thinkBody.classList.remove("collapsed");
+  thinkSide.style.display = showThink ? "flex" : "none";
   $("#thinkingToggle").textContent = "收起";
-  $("#thinkingHead").classList.add("active");
+  $("#thinkingSpin").classList.add("active");
 
   // 组装请求（带文件用 multipart）；审查模式走专用端点
   const endpoint = REVIEW_ENABLED ? "/api/generate/with_review" : "/api/generate";
@@ -410,7 +411,7 @@ function handleEvent(payload, ctx) {
       break;
     case "image_analysis_start":
       updatePipelineTitle("正在分析上传的参考图片…");
-      log("正在用 MiMo 分析上传图片…");
+      log("正在分析上传图片…");
       break;
     case "image_analysis_result":
       if (data.summary) log("参考图片分析完成", "ok");
@@ -430,7 +431,7 @@ function handleEvent(payload, ctx) {
       if (data.status === "rendering") {
         updatePipelineTitle("正在渲染预览图…");
       } else if (data.status === "analyzing") {
-        updatePipelineTitle("MiMo 正在审查画面…");
+        updatePipelineTitle("正在审查画面…");
       } else if (data.status === "review_skipped") {
         log("视觉审查跳过：" + data.reason, "warn");
         updatePipelineTitle("审查跳过");
@@ -482,7 +483,7 @@ function handleEvent(payload, ctx) {
 function finishGenerate() {
   $("#btnGenerate").style.display = "inline-flex";
   $("#btnStop").style.display = "none";
-  $("#thinkingHead").classList.remove("active");
+  $("#thinkingSpin").classList.remove("active");
   ABORT = null;
   // 审查模式下不自动隐藏 pipeline UI
   if (!REVIEW_ENABLED) showPipelineUI(false);
@@ -511,7 +512,7 @@ function initPipelineSteps(maxIter) {
   const host = $("#pipelineSteps");
   if (!host) return;
   host.innerHTML = "";
-  const steps = ["生成初始画面", "MiMo 视觉审查"];
+  const steps = ["生成初始画面", "视觉审查"];
   if (maxIter > 1) steps.push("修正画面");
   steps.forEach((label, i) => {
     const div = document.createElement("div");
@@ -782,9 +783,9 @@ async function saveSettings() {
   const mimo = CONFIG.mimo || {};
   mimo.enabled = $("#setMimoEnabled").checked;
   mimo.force_mimo_review = $("#setForceMimo").checked;
-  mimo.base_url = $("#setMimoBaseUrl").value.trim() || "https://api.xiaomimimo.com/v1";
+  mimo.base_url = $("#setMimoBaseUrl").value.trim() || "https://api.example.com/v1";
   mimo.api_key = $("#setMimoApiKey").value.trim();
-  mimo.model = $("#setMimoModel").value.trim() || "mimo-v2.5";
+  mimo.model = $("#setMimoModel").value.trim() || "vision-model-v1";
   const maxIterVal = parseInt($("#setMimoMaxIter").value);
   mimo.max_iterations = (Number.isFinite(maxIterVal) && maxIterVal >= 1) ? maxIterVal : 3;
   const thresholdVal = parseInt($("#setMimoThreshold").value);
