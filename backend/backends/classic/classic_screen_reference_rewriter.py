@@ -6,8 +6,8 @@ V3.2: 解决 Basic Panel 导入后变量引用残留模板变量的问题。
 
 必须重写:
   - FunctionList action 参数 (Press/Release/Click)
-  - IOField ProcessTag
-  - SymbolicIOField ProcessTag + TextList
+  - IOField ProcessValue
+  - SymbolicIOField ProcessValue + TextList
   - 动态颜色 SourceTag (LinkList/OpenLink)
   - 可见性/闪烁引用
   - LinkList 中的变量 Name
@@ -172,6 +172,53 @@ def _local_tag(elem: ET.Element) -> str:
         parts = tag.rsplit(".", 1)[-1]
         return parts
     return tag
+
+
+def _set_local_tag_name(elem: ET.Element, new_local: str):
+    """替换元素本地名，尽量保留 namespace 或 dotted 前缀风格。"""
+    tag = elem.tag
+    if "}" in tag:
+        elem.tag = tag.rsplit("}", 1)[0] + "}" + new_local
+    elif "." in tag:
+        elem.tag = tag.rsplit(".", 1)[0] + "." + new_local
+    else:
+        elem.tag = new_local
+
+
+def _set_process_value_node(node: ET.Element, tag_name: str, typed: bool = True) -> bool:
+    """设置 ProcessValue 变量引用。
+
+    IOField 使用 Type="Tag"，SymbolicIOField 不允许显式 Type。
+    """
+    changed = False
+    if typed:
+        if node.get("Type") != "Tag":
+            node.set("Type", "Tag")
+            changed = True
+    elif "Type" in node.attrib:
+        node.attrib.pop("Type", None)
+        changed = True
+
+    name_node = None
+    for child in node:
+        if _local_tag(child) == "Name":
+            name_node = child
+            break
+
+    if name_node is not None:
+        if (name_node.text or "").strip() != tag_name:
+            name_node.text = tag_name
+            changed = True
+        node.text = node.text if (node.text or "").strip() == "" else None
+        return changed
+
+    for child in list(node):
+        node.remove(child)
+        changed = True
+    if (node.text or "").strip() != tag_name:
+        node.text = tag_name
+        changed = True
+    return changed
 
 
 def _strip_ns(tag: str) -> str:
@@ -350,7 +397,7 @@ class ClassicScreenReferenceRewriter:
         # A. 重写 FunctionList Event 中的 Action 参数 (Press/Release/Click)
         changes.extend(self._rewrite_function_list_events(item_elem, obj_name, ctrl))
 
-        # B. 重写 ProcessTag (IOField, SymbolicIOField)
+        # B. 重写 ProcessValue (IOField, SymbolicIOField)
         changes.extend(self._rewrite_process_tag(item_elem, obj_name, ctrl))
 
         # C. 重写 TextList (SymbolicIOField)
@@ -444,29 +491,47 @@ class ClassicScreenReferenceRewriter:
         return ctrl.tag_name
 
     # ------------------------------------------------------------------
-    # ProcessTag 重写 (IOField, SymbolicIOField)
+    # ProcessValue 重写 (IOField, SymbolicIOField)
     # ------------------------------------------------------------------
 
     def _rewrite_process_tag(
         self, item_elem: ET.Element, obj_name: str, ctrl: ControlBindingMap,
     ) -> list[str]:
-        """重写 ProcessTag 引用。
+        """重写 IO/SymbolicIO 的 ProcessValue 引用。
 
-        XML 形式: ProcessTag 可能作为属性或在 AttributeList 内。
+        XML 形式: ProcessValue 可能作为属性或在 AttributeList 内。
+        旧生成器可能留下 ProcessTag，但 TIA 的 Hmi.Screen.IOField 不支持，
+        这里统一迁移为 ProcessValue。
         """
         changes: list[str] = []
 
-        # 直接在 AttributeList 中查找 ProcessTag
+        found = False
         for attr_list in item_elem.findall(".//"):
             if _local_tag(attr_list) == "AttributeList":
                 for child in attr_list:
-                    if _local_tag(child) == "ProcessTag":
+                    child_local = _local_tag(child)
+                    if child_local in ("ProcessValue", "ProcessTag"):
                         old = (child.text or "").strip()
-                        if old in self._template_tag_names or (
-                            ctrl.tag_name and old != ctrl.tag_name
-                        ):
-                            child.text = ctrl.tag_name
-                            changes.append(f"ProcessTag: '{old}' → '{ctrl.tag_name}'")
+                        if child_local == "ProcessTag":
+                            _set_local_tag_name(child, "ProcessValue")
+                        _set_process_value_node(
+                            child,
+                            ctrl.tag_name,
+                            typed=(ctrl.control_type != "SymbolicIOField"),
+                        )
+                        found = True
+                        if old != ctrl.tag_name or child_local == "ProcessTag":
+                            changes.append(f"{child_local}: '{old}' → ProcessValue '{ctrl.tag_name}'")
+
+                if not found and ctrl.control_type in ("IOField", "SymbolicIOField") and ctrl.tag_name:
+                    node = ET.SubElement(attr_list, "ProcessValue")
+                    _set_process_value_node(
+                        node,
+                        ctrl.tag_name,
+                        typed=(ctrl.control_type != "SymbolicIOField"),
+                    )
+                    found = True
+                    changes.append(f"ProcessValue: added '{ctrl.tag_name}'")
 
         return changes
 

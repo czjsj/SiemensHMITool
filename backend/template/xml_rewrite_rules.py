@@ -234,6 +234,9 @@ def rebind_control_tag_references(
             elem.text = new_tag
             replaced_count += 1
 
+        if elem_local in _DIRECT_TAG_VALUE_NODES:
+            replaced_count += _replace_child_name_reference(elem, new_tag, old_set)
+
         if _is_tag_parameter(elem) and elem.text and elem.text.strip():
             elem.text = new_tag
             replaced_count += 1
@@ -273,6 +276,9 @@ def collect_control_tag_references(node: ET.Element) -> set[str]:
         if elem_local in _DIRECT_TAG_VALUE_NODES and elem.text and elem.text.strip():
             refs.add(elem.text.strip())
 
+        if elem_local in _DIRECT_TAG_VALUE_NODES:
+            refs.update(_collect_child_name_references(elem))
+
         if _is_tag_parameter(elem) and elem.text and elem.text.strip():
             refs.add(elem.text.strip())
 
@@ -298,6 +304,29 @@ def collect_control_tag_references(node: ET.Element) -> set[str]:
 def _is_tag_parameter(elem: ET.Element) -> bool:
     param_name = elem.get("Name") or elem.get("name") or ""
     return param_name.strip().lower() in _TAG_PARAMETER_NAMES
+
+
+def _replace_child_name_reference(elem: ET.Element, new_tag: str, old_tags: set[str]) -> int:
+    replaced = 0
+    for child in elem:
+        if local_name(child.tag).lower() != "name":
+            continue
+        value = (child.text or "").strip()
+        if not value:
+            continue
+        if old_tags and value not in old_tags:
+            continue
+        child.text = new_tag
+        replaced += 1
+    return replaced
+
+
+def _collect_child_name_references(elem: ET.Element) -> set[str]:
+    refs: set[str] = set()
+    for child in elem:
+        if local_name(child.tag).lower() == "name" and child.text and child.text.strip():
+            refs.add(child.text.strip())
+    return refs
 
 
 def _is_openlink_tag_ref(elem: ET.Element) -> bool:

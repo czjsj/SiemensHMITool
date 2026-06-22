@@ -2,7 +2,7 @@
 <Document>
   <Engineering version="V16" />
   <DocumentInfo>
-    <Created>2026-06-22T00:03:25.9852903Z</Created>
+    <Created>2026-06-22T03:11:55.4424005Z</Created>
     <ExportSetting>WithDefaults</ExportSetting>
     <InstalledProducts>
       <Product>
@@ -290,11 +290,11 @@
               <DataFormat>Decimal</DataFormat>
               <EdgeStyle>Double</EdgeStyle>
               <Enabled>true</Enabled>
-              <FieldLength>10</FieldLength>
+              <FieldLength>5</FieldLength>
               <FitToLargest>false</FitToLargest>
               <Flashing>None</Flashing>
               <ForeColor>49, 52, 74</ForeColor>
-              <FormatPattern>9999999</FormatPattern>
+              <FormatPattern>s99999</FormatPattern>
               <Height>32</Height>
               <HiddenInput>false</HiddenInput>
               <HorizontalAlignment>Left</HorizontalAlignment>
@@ -338,9 +338,26 @@
                   </MultilingualTextItem>
                 </ObjectList>
               </MultilingualText>
+              <Hmi.Screen.Property ID="22" CompositionName="Properties">
+                <AttributeList>
+                  <Name>ProcessValue</Name>
+                </AttributeList>
+                <ObjectList>
+                  <Hmi.Dynamic.TagConnectionDynamic ID="23" CompositionName="Dynamic">
+                    <AttributeList>
+                      <Indirect>false</Indirect>
+                    </AttributeList>
+                    <LinkList>
+                      <Tag TargetID="@OpenLink">
+                        <Name>IOField</Name>
+                      </Tag>
+                    </LinkList>
+                  </Hmi.Dynamic.TagConnectionDynamic>
+                </ObjectList>
+              </Hmi.Screen.Property>
             </ObjectList>
           </Hmi.Screen.IOField>
-          <Hmi.Screen.SymbolicIOField ID="22" CompositionName="ScreenItems">
+          <Hmi.Screen.SymbolicIOField ID="25" CompositionName="ScreenItems">
             <AttributeList>
               <AboveUpperLimitColor>237, 88, 97</AboveUpperLimitColor>
               <BackColor>255, 255, 255</BackColor>
@@ -381,9 +398,9 @@
               <Width>96</Width>
             </AttributeList>
             <ObjectList>
-              <Hmi.Globalization.MultiLingualFont ID="23" CompositionName="Font">
+              <Hmi.Globalization.MultiLingualFont ID="26" CompositionName="Font">
                 <ObjectList>
-                  <Hmi.Globalization.FontItem ID="24" CompositionName="Items">
+                  <Hmi.Globalization.FontItem ID="27" CompositionName="Items">
                     <AttributeList>
                       <Culture>zh-CN</Culture>
                       <FontFamily>宋体</FontFamily>
@@ -393,9 +410,9 @@
                   </Hmi.Globalization.FontItem>
                 </ObjectList>
               </Hmi.Globalization.MultiLingualFont>
-              <MultilingualText ID="25" CompositionName="HelpText">
+              <MultilingualText ID="28" CompositionName="HelpText">
                 <ObjectList>
-                  <MultilingualTextItem ID="26" CompositionName="Items">
+                  <MultilingualTextItem ID="29" CompositionName="Items">
                     <AttributeList>
                       <Culture>zh-CN</Culture>
                       <Text />
@@ -403,9 +420,26 @@
                   </MultilingualTextItem>
                 </ObjectList>
               </MultilingualText>
-              <MultilingualText ID="27" CompositionName="TextOff">
+              <Hmi.Screen.Property ID="2A" CompositionName="Properties">
+                <AttributeList>
+                  <Name>ProcessValue</Name>
+                </AttributeList>
                 <ObjectList>
-                  <MultilingualTextItem ID="28" CompositionName="Items">
+                  <Hmi.Dynamic.TagConnectionDynamic ID="2B" CompositionName="Dynamic">
+                    <AttributeList>
+                      <Indirect>false</Indirect>
+                    </AttributeList>
+                    <LinkList>
+                      <Tag TargetID="@OpenLink">
+                        <Name>IOField_1</Name>
+                      </Tag>
+                    </LinkList>
+                  </Hmi.Dynamic.TagConnectionDynamic>
+                </ObjectList>
+              </Hmi.Screen.Property>
+              <MultilingualText ID="2D" CompositionName="TextOff">
+                <ObjectList>
+                  <MultilingualTextItem ID="2E" CompositionName="Items">
                     <AttributeList>
                       <Culture>zh-CN</Culture>
                       <Text><body><p>0</p></body></Text>
@@ -413,9 +447,9 @@
                   </MultilingualTextItem>
                 </ObjectList>
               </MultilingualText>
-              <MultilingualText ID="29" CompositionName="TextOn">
+              <MultilingualText ID="2F" CompositionName="TextOn">
                 <ObjectList>
-                  <MultilingualTextItem ID="2A" CompositionName="Items">
+                  <MultilingualTextItem ID="30" CompositionName="Items">
                     <AttributeList>
                       <Culture>zh-CN</Culture>
                       <Text><body><p>1</p></body></Text>
@@ -425,7 +459,7 @@
               </MultilingualText>
             </ObjectList>
           </Hmi.Screen.SymbolicIOField>
-          <Hmi.Screen.TextField ID="2B" CompositionName="ScreenItems">
+          <Hmi.Screen.TextField ID="31" CompositionName="ScreenItems">
             <AttributeList>
               <BackColor>255, 255, 255</BackColor>
               <BackFillStyle>Transparent</BackFillStyle>
@@ -453,9 +487,9 @@
               <Width>41</Width>
             </AttributeList>
             <ObjectList>
-              <Hmi.Globalization.MultiLingualFont ID="2C" CompositionName="Font">
+              <Hmi.Globalization.MultiLingualFont ID="32" CompositionName="Font">
                 <ObjectList>
-                  <Hmi.Globalization.FontItem ID="2D" CompositionName="Items">
+                  <Hmi.Globalization.FontItem ID="33" CompositionName="Items">
                     <AttributeList>
                       <Culture>zh-CN</Culture>
                       <FontFamily>宋体</FontFamily>
@@ -465,9 +499,9 @@
                   </Hmi.Globalization.FontItem>
                 </ObjectList>
               </Hmi.Globalization.MultiLingualFont>
-              <MultilingualText ID="2E" CompositionName="Text">
+              <MultilingualText ID="34" CompositionName="Text">
                 <ObjectList>
-                  <MultilingualTextItem ID="2F" CompositionName="Items">
+                  <MultilingualTextItem ID="35" CompositionName="Items">
                     <AttributeList>
                       <Culture>zh-CN</Culture>
                       <Text><body><p>Text</p></body></Text>

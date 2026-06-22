@@ -732,8 +732,14 @@ def _apply_object_to_item(obj: dict, item: ET.Element, warnings: list):
             from backend.template.xml_rewrite_rules import rebind_control_tag_references
             rebound = rebind_control_tag_references(item, tag, template_tag_refs)
         except Exception as e:
-            warnings.append(f"控件 '{oid}' 变量重绑定失败，尝试旧方式写入 ProcessTag: {e}")
-        if rebound <= 0:
+            warnings.append(f"控件 '{oid}' 变量重绑定失败，尝试旧方式写入过程变量: {e}")
+        if otype in ("IOField", "SymbolicIOField", "io_field", "symbolic_io_field"):
+            if rebound <= 0:
+                warnings.append(
+                    f"IO 域控件 '{oid}' 未在模板中找到可替换的变量引用，已保留模板原始绑定结构。"
+                    "请确认该模板控件已在 TIA 中预先绑定变量。"
+                )
+        elif rebound <= 0:
             _set_process_tag(item, tag)
 
     # 颜色（Button: background_color; Indicator: color_on/color_off; Text: color）
@@ -886,7 +892,7 @@ def _set_process_tag(item: ET.Element, tag: str):
             if ctag == prop_name:
                 child.text = tag
                 found = True
-                break
+                return
         if found:
             return
 
@@ -894,6 +900,119 @@ def _set_process_tag(item: ET.Element, tag: str):
         if prop_name in item.attrib:
             item.set(prop_name, tag)
             return
+
+
+def _ensure_io_process_value(
+    item: ET.Element,
+    tag: str,
+    warnings: list,
+    oid: str = "",
+    typed: bool | None = None,
+) -> bool:
+    """确保 IOField/SymbolicIOField 有直接过程变量绑定。
+
+    有些从模板复制出来的 IO 域只有外观属性，没有 ProcessValue
+    占位符。普通替换逻辑找不到变量位置时，控件会导入成功但不会连接变量。
+    当前 TIA 中 IOField 需要 ProcessValue Type="Tag"，但 SymbolicIOField
+    不支持显式 Type，因此两者必须分开写。
+    """
+    if not tag:
+        return False
+
+    if typed is None:
+        typed = _local_tag(item) == "IOField"
+
+    changed = False
+    found_process_value = False
+
+    # 优先更新已有的直接过程值属性；只处理 AttributeList 内的字段，
+    # 避免误改 FunctionList 的 SetValue.Value 等动作参数。
+    for attr_list in item.iter():
+        if _local_tag(attr_list) != "AttributeList":
+            continue
+        for child in attr_list:
+            ctag = _local_tag(child)
+            if ctag == "ProcessValue":
+                found_process_value = True
+                changed = _set_process_value_node(child, tag, typed=typed) or changed
+            elif ctag == "ProcessTag":
+                _set_local_tag_name(child, "ProcessValue")
+                _set_process_value_node(child, tag, typed=typed)
+                found_process_value = True
+                changed = True
+                warnings.append(
+                    f"IO 域控件 '{oid or _get_item_name(item) or '?'}' 使用了 TIA 不支持的 ProcessTag，已改为 ProcessValue。"
+                )
+        if found_process_value:
+            return True
+
+    # 兜底：在控件的直接 AttributeList 下新增 ProcessValue。
+    attr_list = _get_or_create_direct_attribute_list(item)
+    process_value_node = ET.SubElement(attr_list, "ProcessValue")
+    _set_process_value_node(process_value_node, tag, typed=typed)
+    warnings.append(
+        f"IO 域控件 '{oid or _get_item_name(item) or '?'}' 模板中没有过程变量槽，已新增 ProcessValue='{tag}'。"
+    )
+    return True
+
+
+def _set_process_value_node(node: ET.Element, tag: str, typed: bool = True) -> bool:
+    """设置 ProcessValue 变量引用。
+
+    IOField 使用 Type="Tag"，SymbolicIOField 不允许显式 Type。
+    """
+    changed = False
+    if typed:
+        if node.get("Type") != "Tag":
+            node.set("Type", "Tag")
+            changed = True
+    elif "Type" in node.attrib:
+        node.attrib.pop("Type", None)
+        changed = True
+
+    # 如果模板原来使用 <ProcessValue><Name>xxx</Name></ProcessValue>，
+    # 保留这个结构；否则使用文本形式 <ProcessValue Type="Tag">xxx</ProcessValue>。
+    name_node = None
+    for child in node:
+        if _local_tag(child) == "Name":
+            name_node = child
+            break
+
+    if name_node is not None:
+        if (name_node.text or "").strip() != tag:
+            name_node.text = tag
+            changed = True
+        node.text = node.text if (node.text or "").strip() == "" else None
+        return changed
+
+    for child in list(node):
+        node.remove(child)
+        changed = True
+    if (node.text or "").strip() != tag:
+        node.text = tag
+        changed = True
+    return changed
+
+
+def _get_or_create_direct_attribute_list(item: ET.Element) -> ET.Element:
+    """返回控件直接子级 AttributeList；不存在则创建。"""
+    for child in item:
+        if _local_tag(child) == "AttributeList":
+            return child
+    return ET.SubElement(item, "AttributeList")
+
+
+def _set_local_tag_name(elem: ET.Element, new_local: str):
+    """替换元素本地名，尽量保留 namespace 或 dotted 前缀风格。"""
+    tag = elem.tag
+    if "}" in tag:
+        prefix = tag.rsplit("}", 1)[0] + "}"
+        elem.tag = prefix + new_local
+    elif "." in tag:
+        prefix = tag.rsplit(".", 1)[0] + "."
+        elem.tag = prefix + new_local
+    else:
+        elem.tag = new_local
 
 
 def _set_background_color(item: ET.Element, hex_color: str, warnings: list):
@@ -1274,6 +1393,15 @@ def generate_from_template_v4(
                 if replaced == 0 and old_tags:
                     warnings.append(
                         f"控件 '{item_id}' 未找到可重绑定的模板变量位置，目标变量为 '{tag_binding}'。"
+                    )
+                item_type_value = item.type.value if hasattr(item.type, "value") else str(item.type)
+                if (
+                    item_type_value in ("io_field", "symbolic_io_field", "IOField", "SymbolicIOField")
+                    and replaced == 0
+                ):
+                    warnings.append(
+                        f"IO 域控件 '{item_id}' 未在模板原型中找到可替换的变量引用，已保留模板原始绑定结构。"
+                        "请确认该模板控件已在 TIA 中预先绑定变量。"
                     )
 
             # Verify no placeholder remains

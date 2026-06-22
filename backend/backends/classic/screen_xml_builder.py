@@ -70,9 +70,15 @@ class ScreenXmlBuilder:
             f'  <Properties>',
         ]
 
-        # ProcessTag — 有 tag_binding 的控件输出（Button 通过 FunctionList 绑定，IOField/SIO 直接绑定）
+        # ProcessValue — IOField/SymbolicIOField 直接过程值绑定。
+        # IOField 需要 Type="Tag"，SymbolicIOField 不支持显式 Type。
         if item.tag_binding:
-            lines.append(f'    <ProcessTag>{xml_escape(item.tag_binding)}</ProcessTag>')
+            if item.type == ScreenItemType.IO_FIELD:
+                lines.append(f'    <ProcessValue Type="Tag">{xml_escape(item.tag_binding)}</ProcessValue>')
+            elif item.type == ScreenItemType.SYMBOLIC_IO_FIELD:
+                lines.append(f'    <ProcessValue>{xml_escape(item.tag_binding)}</ProcessValue>')
+            else:
+                lines.append(f'    <ProcessTag>{xml_escape(item.tag_binding)}</ProcessTag>')
 
         # TextList — SymbolicIOField 必须
         if item.type == ScreenItemType.SYMBOLIC_IO_FIELD:
