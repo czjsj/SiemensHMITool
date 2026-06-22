@@ -94,6 +94,107 @@ def _is_title_text(o: dict) -> bool:
     )
 
 
+def _text_width(text: str, font_size: int) -> int:
+    """估算文本像素宽度（CJK 近似全角，ASCII 按 0.6 倍）。"""
+    if not text:
+        return 0
+    cjk = sum(1 for c in text if ord(c) > 0x2E7F)
+    other = len(text) - cjk
+    return int(font_size * cjk + font_size * 0.6 * other)
+
+
+def _is_label_text(o: dict) -> bool:
+    """判断 Text 对象是否为控件的标签文字（非标题）。"""
+    if o.get("type") != "Text" or _is_title_text(o):
+        return False
+    oid = (o.get("id") or "").lower()
+    return oid.endswith("_label") or oid.endswith("_lbl")
+
+
+def _find_control_for_label(label: dict, controls: list) -> dict | None:
+    """根据 id 前缀和邻近关系找到标签对应的控件。"""
+    lid = label.get("id", "")
+    base = lid
+    for suf in ("_Label", "_lbl", "_Lbl", "_label", "_LBL"):
+        if base.endswith(suf):
+            base = base[:-len(suf)]
+            break
+    name_part = base[4:] if base.startswith("TXT_") else base
+    for ctrl in controls:
+        cid = ctrl.get("id", "")
+        for prefix in ("IO_", "SIO_", "LMP_", "BTN_", "STS_"):
+            if cid.startswith(prefix) and cid[len(prefix):] == name_part:
+                return ctrl
+    lx1, ly1, lx2, ly2 = _bbox(label)
+    candidates = []
+    for ctrl in controls:
+        if ctrl.get("type") not in ("IOField", "SymbolicIOField", "Indicator"):
+            continue
+        cx1, cy1, cx2, cy2 = _bbox(ctrl)
+        v_overlap = min(ly2, cy2) - max(ly1, cy1)
+        if v_overlap <= 0:
+            continue
+        gap = cx1 - lx2
+        if -10 <= gap <= 140:
+            candidates.append((gap, ctrl))
+    if candidates:
+        candidates.sort(key=lambda t: t[0])
+        return candidates[0][1]
+    return None
+
+
+def _relocate_label(label: dict, ctrl: dict, sw: int, sh: int,
+                    margin_x: int, margin_y: int):
+    """将标签 Text 重定位到控件正上方（IO 域）或正下方（指示灯），居中对齐。"""
+    text = label.get("text", "")
+    fs = int(label.get("font_size", 16))
+    tw = _text_width(text, fs)
+    th = fs + 4
+    gap = 10
+    ctype = ctrl.get("type")
+    if ctype in ("IOField", "SymbolicIOField"):
+        cw = int(ctrl.get("width", 140))
+        cx = int(ctrl.get("x", 0)) + cw // 2
+        cy = int(ctrl.get("y", 0))
+        ly = cy - gap - th
+        if ly < margin_y:
+            delta = margin_y - ly
+            ctrl["y"] = int(ctrl.get("y", 0)) + delta
+            ly = margin_y
+        label["x"] = cx
+        label["y"] = ly
+    elif ctype == "Indicator":
+        r = int(ctrl.get("radius", 22))
+        cx = int(ctrl.get("x", 0)) + r
+        cy = int(ctrl.get("y", 0))
+        ly = cy + 2 * r + gap
+        if ly + th > sh - margin_y:
+            delta = (ly + th) - (sh - margin_y)
+            ctrl["y"] = int(ctrl.get("y", 0)) - delta
+            ly = cy - delta + 2 * r + gap
+        label["x"] = cx
+        label["y"] = ly
+    label["width"] = tw + 12
+    label["height"] = th
+    label["_anchor"] = "middle"
+    label["_attached_to"] = ctrl.get("id", "")
+    if ctrl.get("label"):
+        ctrl["label"] = ""
+
+
+def _associate_and_relocate_labels(objects: list, sw: int, sh: int,
+                                   margin_x: int, margin_y: int):
+    """关联标签 Text 与控件，并重定位为垂直分组居中布局。"""
+    controls = [o for o in objects
+                if o.get("type") in ("IOField", "SymbolicIOField", "Indicator")]
+    for label in objects:
+        if not _is_label_text(label):
+            continue
+        ctrl = _find_control_for_label(label, controls)
+        if ctrl:
+            _relocate_label(label, ctrl, sw, sh, margin_x, margin_y)
+
+
 def _object_center_y(o: dict) -> float:
     x1, y1, x2, y2 = _bbox(o)
     return (y1 + y2) / 2.0
@@ -159,12 +260,13 @@ def _optimize_layout(ir: dict) -> dict:
 
     warnings = ir.setdefault("_warnings", [])
 
-    # 标题轻度规范化：居中并吸附到顶部安全区域。
+    # 标题强制水平居中：使用中心锚点，文字中心与画布中心线重合。
     for o in objects:
         if _is_title_text(o):
             w = int(o.get("width", min(360, sw - 2 * margin_x)))
             o["width"] = min(w, max(80, sw - 2 * margin_x))
-            o["x"] = max(margin_x, int((sw - o["width"]) / 2))
+            o["x"] = sw // 2
+            o["_anchor"] = "middle"
             o["y"] = max(margin_y, min(int(o.get("y", margin_y)), margin_y + 12))
             break
 
@@ -252,6 +354,9 @@ def _optimize_layout(ir: dict) -> dict:
         if y1 + height > sh - margin_y:
             y1 = max(margin_y, sh - margin_y - height)
         _move_to_bbox(o, x1, y1)
+
+    # 标签 Text 与控件的垂直分组居中布局（IO 域标签在正上方，指示灯标签在正下方）。
+    _associate_and_relocate_labels(objects, sw, sh, margin_x, margin_y)
 
     warnings.append("已对 IR 自动执行轻量布局优化：对齐、最小间距、重叠与越界修正。")
     ir["_layout_optimized"] = True

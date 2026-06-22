@@ -99,31 +99,56 @@ def _draw_text(draw: ImageDraw.Draw, o: Dict[str, Any], _screen_size: Tuple[int,
     bold = o.get("bold", False)
     color = o.get("color", "#E6EDF3")
     font = _get_font(font_size, bold)
-    draw.text((x, y), text, fill=color, font=font)
+    if o.get("_anchor") == "middle":
+        try:
+            bbox = draw.textbbox((0, 0), text, font=font)
+            tw = bbox[2] - bbox[0]
+        except Exception:
+            tw = font_size * len(text)
+        draw.text((x - tw // 2, y), text, fill=color, font=font)
+    else:
+        draw.text((x, y), text, fill=color, font=font)
 
 
-def _draw_label(draw: ImageDraw.Draw, o: Dict[str, Any]):
-    """对象左侧/上方的中文标签"""
+def _draw_io_label(draw: ImageDraw.Draw, o: Dict[str, Any]):
+    """IO 域标签：正上方居中"""
     label = o.get("label", "")
     if not label:
         return
     x = o.get("x", 0)
     y = o.get("y", 0)
-    h = o.get("height", 40)
-    font_size = o.get("font_size", 16)
+    w = o.get("width", 140)
+    font_size = 14
     font = _get_font(font_size)
-    # 标签放在对象左侧
-    lx = x - 8
-    ly = y + h // 2 - font_size // 2
-    # 估算文本宽度以右对齐
     try:
         bbox = draw.textbbox((0, 0), label, font=font)
         tw = bbox[2] - bbox[0]
     except Exception:
         tw = font_size * len(label)
-    lx = x - 8 - tw
-    if lx < 4:
-        lx = 4
+    cx = x + w // 2
+    lx = cx - tw // 2
+    ly = y - 10 - font_size
+    draw.text((lx, ly), label, fill="#C9D3DE", font=font)
+
+
+def _draw_indicator_label(draw: ImageDraw.Draw, o: Dict[str, Any]):
+    """指示灯标签：正下方居中"""
+    label = o.get("label", "")
+    if not label:
+        return
+    x = o.get("x", 0)
+    y = o.get("y", 0)
+    r = o.get("radius", 22)
+    font_size = 13
+    font = _get_font(font_size)
+    try:
+        bbox = draw.textbbox((0, 0), label, font=font)
+        tw = bbox[2] - bbox[0]
+    except Exception:
+        tw = font_size * len(label)
+    cx = x + r
+    lx = cx - tw // 2
+    ly = y + 2 * r + 12
     draw.text((lx, ly), label, fill="#C9D3DE", font=font)
 
 
@@ -160,7 +185,7 @@ def _draw_io_field(draw: ImageDraw.Draw, o: Dict[str, Any], ss: Tuple[int, int])
         ufont = _get_font(font_size - 2)
         draw.text((ux, uy), unit, fill="#9AA7B4", font=ufont)
 
-    _draw_label(draw, o)
+    _draw_io_label(draw, o)
 
 
 def _draw_symbolic_io_field(draw: ImageDraw.Draw, o: Dict[str, Any], ss: Tuple[int, int]):
@@ -181,7 +206,7 @@ def _draw_symbolic_io_field(draw: ImageDraw.Draw, o: Dict[str, Any], ss: Tuple[i
     tx, ty = x + w - 18, y + h // 2 - 3
     draw.polygon([(tx, ty), (tx + 6, ty + 7), (tx + 12, ty)], fill="#8A5CFF")
 
-    _draw_label(draw, o)
+    _draw_io_label(draw, o)
 
 
 def _draw_button(draw: ImageDraw.Draw, o: Dict[str, Any], ss: Tuple[int, int]):
@@ -240,7 +265,7 @@ def _draw_indicator(draw: ImageDraw.Draw, o: Dict[str, Any], ss: Tuple[int, int]
             fill=None, outline=color_on, width=2,
         )
 
-    _draw_label(draw, o)
+    _draw_indicator_label(draw, o)
 
 
 # 对象类型 → 绘制函数

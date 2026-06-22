@@ -98,6 +98,15 @@ def _geo_lines(x: int, y: int, w: int, h: int) -> list:
     ]
 
 
+def _estimate_text_width(text: str, font_size: int) -> int:
+    """估算文本像素宽度（CJK 近似全角，ASCII 按 0.6 倍）。"""
+    if not text:
+        return 0
+    cjk = sum(1 for c in text if ord(c) > 0x2E7F)
+    other = len(text) - cjk
+    return int(font_size * cjk + font_size * 0.6 * other)
+
+
 def _io_field_lines(o: dict) -> list:
     sid = str(uuid.uuid4())
     return [
@@ -227,9 +236,16 @@ def _indicator_lines(o: dict) -> list:
 def _text_lines(o: dict) -> list:
     sid = str(uuid.uuid4())
     text_id = str(uuid.uuid4())
+    if o.get("_anchor") == "middle":
+        tw = _estimate_text_width(o.get("text", ""), o.get("font_size", 18))
+        w = tw + 12
+        x = int(o.get("x", 0)) - w // 2
+        geo = _geo_lines(x, o.get("y", 0), w, o.get("height", 40))
+    else:
+        geo = _geo_lines(o.get("x", 0), o.get("y", 0), o.get("width", 200), o.get("height", 40))
     return [
         f'<ScreenItem ID="{sid}" Name="{xml_escape(o["id"])}" Type="TextField">',
-        *_ind("", _geo_lines(o["x"], o["y"], o.get("width", 200), o.get("height", 40))),
+        *_ind("", geo),
         "<Properties>",
         _ind("", "<Text>"),
         _ind("  ", _elem("ID", text=text_id)),
@@ -244,15 +260,29 @@ def _text_lines(o: dict) -> list:
 
 
 def _label_lines(o: dict) -> list:
-    """有 label 的对象生成左侧说明文本。"""
+    """有 label 的对象生成正上方（IO 域）或正下方（指示灯）居中说明文本。"""
     label = o.get("label")
     if not label:
         return []
+    fs = 14
+    tw = _estimate_text_width(label, fs)
+    lw = tw + 12
+    lh = 28
+    gap = 10
+    ctype = o.get("type")
+    if ctype == "Indicator":
+        r = int(o.get("radius", 22))
+        cx = int(o.get("x", 0)) + r
+        ly = int(o.get("y", 0)) + 2 * r + gap
+    else:
+        cx = int(o.get("x", 0)) + int(o.get("width", 140)) // 2
+        ly = int(o.get("y", 0)) - gap - lh
+    lx = max(0, cx - lw // 2)
     return _text_lines({
         "id": o["id"] + "_lbl",
-        "x": max(0, o["x"] - 90), "y": o["y"] + 8,
-        "width": 84, "height": 28,
-        "text": label, "font_size": 14, "bold": False,
+        "x": lx, "y": ly,
+        "width": lw, "height": lh,
+        "text": label, "font_size": fs, "bold": False,
         "color": "#C9D3DE",
     })
 
@@ -517,7 +547,7 @@ def _generate(ir: dict, tia_version: str, tmpl: dict) -> str:
         builder = _DISPATCH.get(otype)
         if builder:
             lines.extend(_ind(indent + "  ", builder(o)))
-            # 为含 label 的对象生成左侧说明文字（IOField/SymbolicIOField/Indicator）
+            # 为含 label 的对象生成上方/下方居中说明文字（IOField/SymbolicIOField/Indicator）
             if otype in ("IOField", "SymbolicIOField", "Indicator"):
                 label_lines = _label_lines(o)
                 if label_lines:

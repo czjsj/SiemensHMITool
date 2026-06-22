@@ -7,8 +7,8 @@ llm:
     deepseek:
       base_url: https://api.deepseek.com
       api_key: sk-f0cb4ab3cf524b428a55124c91776ae5
-      chat_model: deepseek-v4-pro
-      reasoner_model: deepseek-reasoner
+      chat_model: deepseek-v4-flash
+      reasoner_model: deepseek-v4-flash
       supports_vision: false
     openai_compatible:
       base_url: https://api.openai.com/v1
@@ -366,7 +366,8 @@ mimo:
   model: mimo-v2.5
   max_iterations: 6
   review_timeout_seconds: 90
-  review_pass_threshold: 80
+  review_pass_threshold: 95
+  force_mimo_review: false
   image_analysis_enabled: true
   image_analysis_max_size: 2048
 server:

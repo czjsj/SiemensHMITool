@@ -165,9 +165,9 @@ function syncSettingsFields() {
   const mimo = CONFIG.mimo || {};
   $("#setMimoEnabled").checked = !!mimo.enabled;
   $("#setForceMimo").checked = !!mimo.force_mimo_review;
-  $("#setMimoBaseUrl").value = mimo.base_url || "https://api.example.com/v1";
+  $("#setMimoBaseUrl").value = mimo.base_url || "https://api.xiaomimimo.com/v1";
   $("#setMimoApiKey").value = mimo.api_key || "";
-  $("#setMimoModel").value = mimo.model || "vision-model-v1";
+  $("#setMimoModel").value = mimo.model || "mimo-v2.5";
   $("#setMimoMaxIter").value = mimo.max_iterations || 3;
   $("#setMimoThreshold").value = mimo.review_pass_threshold || 70;
 }
@@ -219,11 +219,10 @@ function bindUI() {
   $("#btnDownloadXml").addEventListener("click", downloadXml);
 
   // 思考折叠
-  $("#thinkingToggle").addEventListener("click", (e) => {
-    e.stopPropagation();
-    const body = $("#thinkingBody");
-    body.classList.toggle("collapsed");
-    $("#thinkingToggle").textContent = body.classList.contains("collapsed") ? "展开" : "收起";
+  $("#thinkingHead").addEventListener("click", () => {
+    const box = $("#thinkingBox");
+    box.classList.toggle("collapsed");
+    $("#thinkingToggle").textContent = box.classList.contains("collapsed") ? "展开" : "收起";
   });
 
   // 日志折叠
@@ -308,13 +307,13 @@ async function startGenerate() {
   LAST_BUILD = null;
 
   const out = $("#outputBody"); out.innerHTML = ""; out.textContent = "";
-  const thinkSide = $("#thinkingSide"), thinkBody = $("#thinkingBody");
+  const thinkBox = $("#thinkingBox"), thinkBody = $("#thinkingBody");
   const showThink = $("#optShowThinking").checked && $("#depthSelect").value !== "关闭";
   thinkBody.textContent = "";
-  thinkBody.classList.remove("collapsed");
-  thinkSide.style.display = showThink ? "flex" : "none";
+  thinkBox.style.display = showThink ? "block" : "none";
+  thinkBox.classList.remove("collapsed");
   $("#thinkingToggle").textContent = "收起";
-  $("#thinkingSpin").classList.add("active");
+  $("#thinkingHead").classList.add("active");
 
   // 组装请求（带文件用 multipart）；审查模式走专用端点
   const endpoint = REVIEW_ENABLED ? "/api/generate/with_review" : "/api/generate";
@@ -411,7 +410,7 @@ function handleEvent(payload, ctx) {
       break;
     case "image_analysis_start":
       updatePipelineTitle("正在分析上传的参考图片…");
-      log("正在分析上传图片…");
+      log("正在用 MiMo 分析上传图片…");
       break;
     case "image_analysis_result":
       if (data.summary) log("参考图片分析完成", "ok");
@@ -431,7 +430,7 @@ function handleEvent(payload, ctx) {
       if (data.status === "rendering") {
         updatePipelineTitle("正在渲染预览图…");
       } else if (data.status === "analyzing") {
-        updatePipelineTitle("正在审查画面…");
+        updatePipelineTitle("MiMo 正在审查画面…");
       } else if (data.status === "review_skipped") {
         log("视觉审查跳过：" + data.reason, "warn");
         updatePipelineTitle("审查跳过");
@@ -483,7 +482,7 @@ function handleEvent(payload, ctx) {
 function finishGenerate() {
   $("#btnGenerate").style.display = "inline-flex";
   $("#btnStop").style.display = "none";
-  $("#thinkingSpin").classList.remove("active");
+  $("#thinkingHead").classList.remove("active");
   ABORT = null;
   // 审查模式下不自动隐藏 pipeline UI
   if (!REVIEW_ENABLED) showPipelineUI(false);
@@ -512,7 +511,7 @@ function initPipelineSteps(maxIter) {
   const host = $("#pipelineSteps");
   if (!host) return;
   host.innerHTML = "";
-  const steps = ["生成初始画面", "视觉审查"];
+  const steps = ["生成初始画面", "MiMo 视觉审查"];
   if (maxIter > 1) steps.push("修正画面");
   steps.forEach((label, i) => {
     const div = document.createElement("div");
@@ -675,7 +674,7 @@ function renderPreview(ir) {
   svg.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="#1f2630"/>`);
 
   for (const o of ir.objects) {
-    svg.push(drawObject(o));
+    svg.push(drawObject(o, W));
   }
   svg.push(`</svg>`);
   host.innerHTML = svg.join("");
@@ -683,11 +682,14 @@ function renderPreview(ir) {
 
 function esc(s) { return String(s == null ? "" : s).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c])); }
 
-function drawObject(o) {
+function drawObject(o, W) {
   const fs = o.font_size || 16;
   switch (o.type) {
     case "Text": {
       const weight = o.bold ? "700" : "400";
+      if (o._anchor === "middle") {
+        return `<text x="${o.x}" y="${o.y + fs}" fill="${o.color || "#e6edf3"}" font-size="${fs}" font-weight="${weight}" text-anchor="middle" font-family="Arial">${esc(o.text)}</text>`;
+      }
       return `<text x="${o.x}" y="${o.y + fs}" fill="${o.color || "#e6edf3"}" font-size="${fs}" font-weight="${weight}" font-family="Arial">${esc(o.text)}</text>`;
     }
     case "IOField": {
@@ -729,7 +731,8 @@ function rectField(x, y, w, h, fill, stroke) {
 }
 function labelSvg(o) {
   if (!o.label) return "";
-  return `<text x="${o.x - 8}" y="${o.y + (o.height || 40) / 2 + 5}" fill="#c9d3de" font-size="14" text-anchor="end" font-family="Arial">${esc(o.label)}</text>`;
+  const cx = o.x + (o.width || 140) / 2;
+  return `<text x="${cx}" y="${o.y - 10}" fill="#c9d3de" font-size="14" text-anchor="middle" font-family="Arial">${esc(o.label)}</text>`;
 }
 
 // ---------------- 配置保存 ----------------
@@ -783,9 +786,9 @@ async function saveSettings() {
   const mimo = CONFIG.mimo || {};
   mimo.enabled = $("#setMimoEnabled").checked;
   mimo.force_mimo_review = $("#setForceMimo").checked;
-  mimo.base_url = $("#setMimoBaseUrl").value.trim() || "https://api.example.com/v1";
+  mimo.base_url = $("#setMimoBaseUrl").value.trim() || "https://api.xiaomimimo.com/v1";
   mimo.api_key = $("#setMimoApiKey").value.trim();
-  mimo.model = $("#setMimoModel").value.trim() || "vision-model-v1";
+  mimo.model = $("#setMimoModel").value.trim() || "mimo-v2.5";
   const maxIterVal = parseInt($("#setMimoMaxIter").value);
   mimo.max_iterations = (Number.isFinite(maxIterVal) && maxIterVal >= 1) ? maxIterVal : 3;
   const thresholdVal = parseInt($("#setMimoThreshold").value);
