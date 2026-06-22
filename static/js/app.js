@@ -164,6 +164,7 @@ function syncSettingsFields() {
   // MiMo 字段（独立于 LLM provider）
   const mimo = CONFIG.mimo || {};
   $("#setMimoEnabled").checked = !!mimo.enabled;
+  $("#setForceMimo").checked = !!mimo.force_mimo_review;
   $("#setMimoBaseUrl").value = mimo.base_url || "https://api.xiaomimimo.com/v1";
   $("#setMimoApiKey").value = mimo.api_key || "";
   $("#setMimoModel").value = mimo.model || "mimo-v2.5";
@@ -460,7 +461,8 @@ function handleEvent(payload, ctx) {
       if (data.passed === true) {
         updatePipelineTitle(`审查通过！(${data.final_score}分)`);
       } else if (data.passed === false) {
-        updatePipelineTitle(`达到最大迭代次数 (${data.final_score}分)`);
+        const doneNote = data.note ? `（${data.note}）` : "";
+        updatePipelineTitle(`审查未通过 (${data.final_score}分)${doneNote}`);
       } else {
         updatePipelineTitle("完成（未审查）");
       }
@@ -563,9 +565,14 @@ function renderReviewResult(data) {
   });
 
   let criticalHtml = "";
-  if ((data.critical_issues || []).length) {
+  const criticalIssues = data.critical_issues || [];
+  if (criticalIssues.length) {
     criticalHtml = '<div class="review-critical"><strong>⚠ 关键问题</strong><ul>' +
-      data.critical_issues.map((s) => "<li>" + esc(s) + "</li>").join("") + "</ul></div>";
+      criticalIssues.map((s) => "<li>" + esc(s) + "</li>").join("") + "</ul></div>";
+  } else if ((data.summary || "").indexOf("解析失败") !== -1) {
+    // 审查结果解析失败时显示提示，而非静默隐藏
+    criticalHtml = '<div class="review-critical"><strong>⚠ 审查结果异常</strong><ul><li>' +
+      esc(data.summary) + '</li></ul></div>';
   }
 
   let sugHtml = "";
@@ -774,11 +781,14 @@ async function saveSettings() {
   // 保存 MiMo 配置
   const mimo = CONFIG.mimo || {};
   mimo.enabled = $("#setMimoEnabled").checked;
+  mimo.force_mimo_review = $("#setForceMimo").checked;
   mimo.base_url = $("#setMimoBaseUrl").value.trim() || "https://api.xiaomimimo.com/v1";
   mimo.api_key = $("#setMimoApiKey").value.trim();
   mimo.model = $("#setMimoModel").value.trim() || "mimo-v2.5";
-  mimo.max_iterations = parseInt($("#setMimoMaxIter").value) || 3;
-  mimo.review_pass_threshold = parseInt($("#setMimoThreshold").value) || 70;
+  const maxIterVal = parseInt($("#setMimoMaxIter").value);
+  mimo.max_iterations = (Number.isFinite(maxIterVal) && maxIterVal >= 1) ? maxIterVal : 3;
+  const thresholdVal = parseInt($("#setMimoThreshold").value);
+  mimo.review_pass_threshold = (Number.isFinite(thresholdVal) && thresholdVal >= 0 && thresholdVal <= 100) ? thresholdVal : 70;
   CONFIG.mimo = mimo;
 
   try {

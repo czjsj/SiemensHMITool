@@ -392,9 +392,10 @@ def _build_revision_messages(requirement: str, review_context: dict) -> list:
 
     previous_ir = review_context.get("previous_ir", {})
     review_result = review_context.get("review_result", {})
+    pass_threshold = review_context.get("pass_threshold", 70)
     from .review_prompts import build_review_feedback_text
 
-    feedback_text = build_review_feedback_text(review_result)
+    feedback_text = build_review_feedback_text(review_result, pass_threshold=pass_threshold)
     ir_json = json.dumps(previous_ir, ensure_ascii=False, indent=2)
 
     system_content = (
@@ -411,7 +412,7 @@ def _build_revision_messages(requirement: str, review_context: dict) -> list:
 {ir_json}
 ```
 
-【MiMo 视觉审查反馈】
+【视觉审查反馈】
 {feedback_text}
 
 请根据上述审查反馈修正 IR，输出修正后的完整 IR JSON（用 ```json 代码块包裹）。
@@ -427,7 +428,7 @@ def _build_revision_messages(requirement: str, review_context: dict) -> list:
 _REGENERATION_SYSTEM_ADDENDUM = """
 【审查反馈改进模式】
 
-你正在根据 MiMo 视觉审查反馈修正之前生成的 HMI 画面 IR。
+你正在根据视觉审查反馈修正之前生成的 HMI 画面 IR。
 请遵守以下原则：
 
 1. 逐项修正审查中 issues 指出的具体问题。

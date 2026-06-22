@@ -203,6 +203,115 @@ class LLMClient:
         return choices[0].get("message", {}).get("content", "") or ""
 
 
+    # ---- 对外：视觉审查（多模态，非流式） ----
+    def review_with_vision(self, images, task, config=None, language="zh-CN"):
+        """用主模型进行视觉审查（多模态输入）。
+
+        与 mimo_client.analyze_with_mimo 返回结构一致：
+            {ok, model, task, visual_result, raw_text, usage}  成功时
+            {ok: false, error_type, message, retryable}         失败时
+
+        参数:
+            images: 图片列表，每项含 type(path|url|base64), value, mime_type(可选)。
+            task:   审查任务提示词文本。
+            config: 预留（主模型配置已在 self.provider 中）。
+            language: 输出语言。
+        """
+        from .mimo_client import _safe_parse_json, _image_to_content_part, _extract_usage
+
+        api_key = self.provider.get("api_key", "")
+        if not api_key:
+            return {
+                "ok": False,
+                "error_type": "auth",
+                "message": f"未配置 {self.provider_name} 的 API Key，无法进行视觉审查。",
+                "retryable": False,
+            }
+
+        if not images or not isinstance(images, list):
+            return {
+                "ok": False,
+                "error_type": "bad_input",
+                "message": "images 必须是非空列表。",
+                "retryable": False,
+            }
+
+        base_url = self.provider["base_url"].rstrip("/")
+        model = self.provider.get("chat_model", "")
+        timeout = 120
+        max_dimension = (config or {}).get("image_analysis_max_size", 2048) if isinstance(config, dict) else 2048
+
+        try:
+            content_parts = [_image_to_content_part(img, max_dimension) for img in images]
+            content_parts.append({"type": "text", "text": task})
+
+            payload = {
+                "model": model,
+                "messages": [
+                    {"role": "user", "content": content_parts},
+                ],
+                "max_tokens": 4096,
+                "temperature": 0.3,
+            }
+
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
+
+            resp = requests.post(
+                f"{base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=timeout,
+            )
+
+            if resp.status_code >= 400:
+                retryable = resp.status_code in {408, 429, 500, 502, 503, 504}
+                return {
+                    "ok": False,
+                    "error_type": "api",
+                    "message": f"主模型视觉审查 API 错误 {resp.status_code}: {resp.text[:1000]}",
+                    "retryable": retryable,
+                }
+
+            raw = resp.json()
+            message = raw.get("choices", [{}])[0].get("message", {})
+            raw_text = message.get("content") or ""
+            parsed = _safe_parse_json(raw_text, output_schema="ui")
+
+            return {
+                "ok": True,
+                "model": raw.get("model", model),
+                "task": task,
+                "visual_result": parsed,
+                "raw_text": raw_text,
+                "usage": _extract_usage(raw),
+            }
+
+        except requests.exceptions.Timeout:
+            return {
+                "ok": False,
+                "error_type": "network",
+                "message": f"主模型视觉审查请求超时（{timeout}s）。",
+                "retryable": True,
+            }
+        except requests.exceptions.ConnectionError as exc:
+            return {
+                "ok": False,
+                "error_type": "network",
+                "message": f"无法连接到主模型 API: {exc}",
+                "retryable": True,
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error_type": "api",
+                "message": str(exc),
+                "retryable": False,
+            }
+
+
 def extract_json(text: str):
     """从模型完整输出中抽取第一个 JSON 对象。返回 dict 或抛 ValueError。"""
     s = text.strip()

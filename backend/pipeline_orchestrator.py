@@ -2,8 +2,16 @@
 """
 多阶段流水线编排器
 ==================
-将「生成 → 预览渲染 → MiMo 视觉审查 → 修正 → 再审查」串联为一个
+将「生成 → 预览渲染 → 视觉审查 → 修正 → 再审查」串联为一个
 SSE 事件生成器，供 Flask 路由直接使用。
+
+视觉审查模型选择策略：
+  - 若主模型支持视觉（supports_vision=True）且已配置 API Key → 使用主模型审查
+  - 否则 → 使用 MiMo 视觉审查
+  - 用户可在设置中勾选"强制使用 MiMo 审查"以忽略主模型视觉能力
+  - 两者均不可用时，视觉审查禁用并提示用户
+
+评分阈值由后端权威判定（score >= pass_threshold），不采信 LLM 返回的 pass 字段。
 
 流水线状态机:
   pipeline_start → [image_analysis] → generate_start →
@@ -25,7 +33,7 @@ from .hmi_ir import validate_ir, IRValidationError, scale_ir_to_resolution
 from .prompts import build_messages
 from .preview_renderer import render_ir_to_png
 from .mimo_client import analyze_with_mimo
-from .review_prompts import HMI_REVIEW_TASK, IMAGE_ANALYSIS_TASK, build_review_feedback_text
+from .review_prompts import build_hmi_review_task, IMAGE_ANALYSIS_TASK, build_review_feedback_text
 from .tia_text_sanitizer import sanitize_ir_text_fields
 from .variable_engine import VariableEngine
 
@@ -52,23 +60,40 @@ def _analyze_uploaded_images(
     images: List[Dict[str, Any]],
     requirement: str,
     mimo_cfg: Dict[str, Any],
+    config: Dict[str, Any] = None,
+    use_main_model: bool = False,
 ) -> str:
-    """用 MiMo 分析上传的参考图片，提取 HMI 相关信息。返回附加文本。"""
-    if not images or not mimo_cfg.get("api_key"):
+    """用视觉模型分析上传的参考图片，提取 HMI 相关信息。返回附加文本。
+
+    use_main_model=True 时使用主模型（需支持视觉），否则使用 MiMo。
+    """
+    if not images:
         return ""
 
     # 只分析前 3 张（避免 token 爆炸）
     to_analyze = images[:3]
-    try:
-        result = analyze_with_mimo(
+
+    if use_main_model and config:
+        client = LLMClient(config)
+        result = client.review_with_vision(
             images=to_analyze,
             task=IMAGE_ANALYSIS_TASK,
-            output_schema="detailed",
             config=mimo_cfg,
             language="zh-CN",
         )
-    except Exception:
-        return ""
+    else:
+        if not mimo_cfg.get("api_key"):
+            return ""
+        try:
+            result = analyze_with_mimo(
+                images=to_analyze,
+                task=IMAGE_ANALYSIS_TASK,
+                output_schema="detailed",
+                config=mimo_cfg,
+                language="zh-CN",
+            )
+        except Exception:
+            return ""
 
     if not result.get("ok"):
         return ""
@@ -95,8 +120,13 @@ def _analyze_uploaded_images(
     return "\n".join(parts)
 
 
-def _safe_review(ir: dict, mimo_cfg: dict) -> dict:
-    """安全地执行一次 MiMo 视觉审查。返回审查结果 dict。"""
+def _safe_review(ir: dict, mimo_cfg: dict, pass_threshold: int = 70,
+                 review_client=None) -> dict:
+    """安全地执行一次视觉审查。返回审查结果 dict。
+
+    review_client: 可选的视觉审查客户端。若为 None 则使用 MiMo。
+    当主模型支持视觉时，可传入具备视觉能力的客户端进行审查。
+    """
     try:
         png_bytes = render_ir_to_png(ir)
     except Exception as exc:
@@ -107,9 +137,20 @@ def _safe_review(ir: dict, mimo_cfg: dict) -> dict:
         }
 
     png_b64 = base64.b64encode(png_bytes).decode("utf-8")
+    images = [{"type": "base64", "value": png_b64, "mime_type": "image/png"}]
+    task = build_hmi_review_task(pass_threshold)
+
+    if review_client is not None:
+        return review_client.review_with_vision(
+            images=images,
+            task=task,
+            config=mimo_cfg,
+            language="zh-CN",
+        )
+
     return analyze_with_mimo(
-        images=[{"type": "base64", "value": png_b64, "mime_type": "image/png"}],
-        task=HMI_REVIEW_TASK,
+        images=images,
+        task=task,
         output_schema="ui",
         config=mimo_cfg,
         language="zh-CN",
@@ -126,6 +167,11 @@ def _summarize_review_for_sse(review_result: dict) -> dict:
         "critical_issues": review_result.get("critical_issues", []),
         "suggestions": review_result.get("suggestions", []),
     }
+
+
+def _is_review_result_valid(visual: dict) -> bool:
+    """检查视觉审查结果是否包含关键字段（用于检测解析失败）。"""
+    return "score" in visual and isinstance(visual.get("score"), (int, float))
 
 
 def run_pipeline(
@@ -147,7 +193,25 @@ def run_pipeline(
         (event_name, data) 元组，event_name 如 SSE 契约定义。
     """
     mimo_cfg = config.get("mimo", {})
-    review_enabled = mimo_cfg.get("enabled", False) and bool(mimo_cfg.get("api_key"))
+    llm_cfg = config.get("llm", {})
+    active_provider = llm_cfg.get("active_provider", "")
+    provider_cfg = (llm_cfg.get("providers", {}) or {}).get(active_provider, {})
+    main_supports_vision = bool(provider_cfg.get("supports_vision", False))
+    main_has_key = bool(provider_cfg.get("api_key", ""))
+    main_can_review = main_supports_vision and main_has_key
+
+    mimo_enabled = bool(mimo_cfg.get("enabled", False)) and bool(mimo_cfg.get("api_key"))
+    force_mimo = bool(mimo_cfg.get("force_mimo_review", False))
+
+    # 视觉审查可用性：主模型支持视觉 或 MiMo 已配置
+    # 模型选择策略：主模型优先（若支持视觉），除非用户强制使用 MiMo
+    if force_mimo:
+        use_main_model_for_review = False
+        review_enabled = mimo_enabled
+    else:
+        use_main_model_for_review = main_can_review
+        review_enabled = main_can_review or mimo_enabled
+
     max_iterations = mimo_cfg.get("max_iterations", 3) if review_enabled else 1
     pass_threshold = mimo_cfg.get("review_pass_threshold", 70)
 
@@ -157,7 +221,9 @@ def run_pipeline(
     # ---- 可选：分析上传的参考图片 ----
     if uploaded_images and review_enabled and mimo_cfg.get("image_analysis_enabled", True):
         yield ("image_analysis_start", {})
-        analysis_text = _analyze_uploaded_images(uploaded_images, requirement, mimo_cfg)
+        analysis_text = _analyze_uploaded_images(
+            uploaded_images, requirement, mimo_cfg, config, use_main_model_for_review,
+        )
         if analysis_text:
             if extra_text:
                 extra_text = extra_text + "\n\n" + analysis_text
@@ -228,12 +294,20 @@ def run_pipeline(
 
     # ---- 如果审查未启用，直接返回 ----
     if not review_enabled:
+        note = (
+            "视觉审查未启用：主模型不支持视觉且 MiMo 未配置。"
+            "请在设置中开启 MiMo 视觉审查并填写 API Key，或选择支持视觉的主模型。"
+        )
         yield ("pipeline_done", {
             "ir": ir, "iterations": 1,
             "final_score": None, "passed": None,
-            "note": "视觉审查未启用（请在设置中开启并填写 MiMo API Key）。",
+            "note": note,
         })
         return
+
+    # ---- 准备视觉审查客户端 ----
+    review_client = client if use_main_model_for_review else None
+    review_model_name = ("主模型(" + active_provider + ")") if use_main_model_for_review else "MiMo"
 
     # ---- 审查-修正循环 ----
     current_ir = ir
@@ -245,15 +319,18 @@ def run_pipeline(
 
         # 渲染 + 审查
         yield ("review_progress", {"status": "rendering"})
-        review_result = _safe_review(current_ir, mimo_cfg)
+        review_result = _safe_review(
+            current_ir, mimo_cfg, pass_threshold=pass_threshold,
+            review_client=review_client,
+        )
 
         if not review_result.get("ok"):
-            reason = review_result.get("message", "MiMo API 错误")
+            reason = review_result.get("message", f"{review_model_name} API 错误")
             yield ("review_progress", {"status": "review_skipped", "reason": reason})
             yield ("pipeline_done", {
                 "ir": current_ir, "iterations": iteration,
                 "final_score": None, "passed": None,
-                "note": f"审查跳过: {reason}",
+                "note": f"第 {iteration} 轮审查跳过（{review_model_name}）: {reason}",
             })
             return
 
@@ -261,8 +338,25 @@ def run_pipeline(
 
         # 解析审查结果
         visual = review_result.get("visual_result", {})
+
+        # 检测审查结果是否有效（防止解析失败导致静默通过）
+        if not _is_review_result_valid(visual):
+            yield ("review_progress", {
+                "status": "review_skipped",
+                "reason": "审查结果解析失败：视觉模型未返回有效 JSON",
+            })
+            yield ("pipeline_done", {
+                "ir": current_ir, "iterations": iteration,
+                "final_score": None, "passed": None,
+                "note": f"第 {iteration} 轮审查结果解析失败（{review_model_name}），"
+                        f"视觉模型未返回有效的 JSON 结构。",
+            })
+            return
+
         score = int(visual.get("score", 0))
-        passed = bool(visual.get("pass", score >= pass_threshold))
+        # 后端权威决策：通过/不通过完全由 score >= pass_threshold 判定
+        # 不再采信 LLM 返回的 pass 字段（避免 LLM 内部阈值与用户配置脱节）
+        passed = score >= pass_threshold
         final_score = score
         final_passed = passed
 
@@ -300,6 +394,7 @@ def run_pipeline(
             review_context={
                 "previous_ir": current_ir,
                 "review_result": visual,
+                "pass_threshold": pass_threshold,
             },
         )
 
@@ -316,7 +411,7 @@ def run_pipeline(
                     yield ("pipeline_done", {
                         "ir": current_ir, "iterations": iteration,
                         "final_score": final_score, "passed": False,
-                        "note": f"修正阶段出错: {text}",
+                        "note": f"第 {iteration} 轮修正阶段出错: {text}",
                     })
                     return
         except Exception as exc:
@@ -324,6 +419,7 @@ def run_pipeline(
             yield ("pipeline_done", {
                 "ir": current_ir, "iterations": iteration,
                 "final_score": final_score, "passed": False,
+                "note": f"第 {iteration} 轮修正生成异常: {exc}",
             })
             return
 

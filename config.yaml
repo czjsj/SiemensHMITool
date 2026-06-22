@@ -31,7 +31,7 @@ openness:
   classic_template:
     enabled: true
     template_screen_name: 画面_1
-    template_xml_path: C:\Users\sunny\Desktop\SiemensHmi_Assistant\SiemensHmi_Assistant_V6.5\SiemensHmi_Assistant\exports/templates\画面_1_template.xml
+    template_xml_path: C:\Users\sunny\Desktop\SiemensHmi_Assistant\SiemensHmi_Assistant_V6.6\SiemensHmi_Assistant\exports/templates\画面_1_template.xml
     tag_template_xml_path: ''
     template_export_dir: exports/templates
     generated_xml_dir: exports/generated_from_template
@@ -41,20 +41,6 @@ openness:
     update_existing_screen: true
     clear_existing_items: true
     unsupported_object_policy: warn
-  template:
-    enabled: true
-    require_prototype_for_button: true
-    require_prototype_for_indicator: true
-    fail_on_placeholder_remaining: true
-    default_button_template: BTN_MOMENTARY_TEMPLATE
-    default_indicator_template: LMP_STATUS_TEMPLATE
-    fallback_to_simaticml: false
-    allow_missing_indicator_template: false
-    allow_missing_button_template: false
-  deployment:
-    import_tags_before_screens: true
-    compile_after_import: true
-    verify_after_compile: true
   default_templates:
     basic:
       enabled: false
@@ -68,6 +54,20 @@ openness:
       enabled: false
       template_screen_name: ''
       template_xml_path: ''
+  deployment:
+    compile_after_import: true
+    import_tags_before_screens: true
+    verify_after_compile: true
+  template:
+    allow_missing_button_template: false
+    allow_missing_indicator_template: false
+    default_button_template: BTN_MOMENTARY_TEMPLATE
+    default_indicator_template: LMP_STATUS_TEMPLATE
+    enabled: true
+    fail_on_placeholder_remaining: true
+    fallback_to_simaticml: false
+    require_prototype_for_button: true
+    require_prototype_for_indicator: true
 hmi_defaults:
   resolution: 800x480
   hmi_type: Basic
@@ -77,7 +77,7 @@ output:
   export_dir: exports
   encoding: utf-8-sig
   reference_xml: "\uFEFF<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Document>\n \
-    \ <Engineering version=\"V16\" />\n  <DocumentInfo>\n    <Created>2026-06-22T03:11:52.0125221Z</Created>\n\
+    \ <Engineering version=\"V16\" />\n  <DocumentInfo>\n    <Created>2026-06-22T07:42:07.9925564Z</Created>\n\
     \    <ExportSetting>WithDefaults</ExportSetting>\n    <InstalledProducts>\n  \
     \    <Product>\n        <DisplayName>Totally Integrated Automation Portal</DisplayName>\n\
     \        <DisplayVersion>V16 Update 8</DisplayVersion>\n      </Product>\n   \
@@ -125,8 +125,8 @@ output:
     >\n                        <Name>Light</Name>\n                      </Tag>\n\
     \                    </LinkList>\n                  </Hmi.Dynamic.TagElementTrigger>\n\
     \                  <Hmi.Dynamic.Range ID=\"9\" CompositionName=\"RangeValues\"\
-    >\n                    <AttributeList>\n                      <BackColor>217,\
-    \ 217, 217</BackColor>\n                      <FlashingType>No</FlashingType>\n\
+    >\n                    <AttributeList>\n                      <BackColor>222,\
+    \ 219, 222</BackColor>\n                      <FlashingType>No</FlashingType>\n\
     \                      <ForeColor>24, 28, 49</ForeColor>\n                   \
     \   <LowerLimit>0</LowerLimit>\n                      <UpperLimit>0</UpperLimit>\n\
     \                    </AttributeList>\n                  </Hmi.Dynamic.Range>\n\
@@ -374,9 +374,9 @@ server:
   port: 5000
   debug: true
 hmi_tag_sync:
-  strategy: auto
   allow_api_create: false
-  allow_hmi_xml_import: true
   allow_existing_tags_only: true
-  golden_template_dir: backend/references/golden_hmi_tags
+  allow_hmi_xml_import: true
   default_tag_table: DefaultTagTable
+  golden_template_dir: backend/references/golden_hmi_tags
+  strategy: auto

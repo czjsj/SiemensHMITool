@@ -84,7 +84,8 @@ DEFAULT_CONFIG = {
         "max_iterations": 3,                     # 最多审查-修正循环次数
         "review_timeout_seconds": 90,            # MiMo API 超时
         "review_pass_threshold": 70,             # 审查通过最低分(0-100)
-        "image_analysis_enabled": True,          # 是否用 MiMo 分析上传的参考图片
+        "force_mimo_review": False,              # 强制使用 MiMo 审查（忽略主模型视觉能力）
+        "image_analysis_enabled": True,          # 是否用视觉模型分析上传的参考图片
         "image_analysis_max_size": 2048,         # 图片超过此尺寸则缩放
     },
     "server": {

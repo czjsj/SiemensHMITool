@@ -2,7 +2,7 @@
 <Document>
   <Engineering version="V16" />
   <DocumentInfo>
-    <Created>2026-06-22T03:11:55.4424005Z</Created>
+    <Created>2026-06-22T07:42:12.1971695Z</Created>
     <ExportSetting>WithDefaults</ExportSetting>
     <InstalledProducts>
       <Product>
@@ -104,7 +104,7 @@
                   </Hmi.Dynamic.TagElementTrigger>
                   <Hmi.Dynamic.Range ID="9" CompositionName="RangeValues">
                     <AttributeList>
-                      <BackColor>217, 217, 217</BackColor>
+                      <BackColor>222, 219, 222</BackColor>
                       <FlashingType>No</FlashingType>
                       <ForeColor>24, 28, 49</ForeColor>
                       <LowerLimit>0</LowerLimit>

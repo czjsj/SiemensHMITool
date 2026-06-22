@@ -460,10 +460,15 @@
       </div>
 
       <hr class="modal-sep">
-      <h3 style="color:var(--accent);font-size:14px;margin:0 0 12px">MiMo 视觉审查</h3>
+      <h3 style="color:var(--accent);font-size:14px;margin:0 0 12px">视觉审查设置</h3>
+      <div class="field">
+        <label>审查模型选择</label>
+        <label class="check"><input type="checkbox" id="setForceMimo"><span class="box"></span>强制使用 MiMo 审查（不勾选时，主模型支持视觉则用主模型）</label>
+        <div class="hint-text">若主模型已勾选"支持图片视觉输入"，默认由主模型执行视觉审查；勾选此项则始终使用 MiMo。</div>
+      </div>
       <div class="field">
         <label>开启视觉审查</label>
-        <label class="check"><input type="checkbox" id="setMimoEnabled"><span class="box"></span>启用 MiMo 多阶段审查流水线</label>
+        <label class="check"><input type="checkbox" id="setMimoEnabled"><span class="box"></span>启用 MiMo 视觉审查（主模型不支持视觉时作为回退）</label>
       </div>
       <div class="field">
         <label>MiMo Base URL</label>

@@ -1,0 +1,297 @@
+{
+  "meta": {
+    "screen_name": "Elevator_Monitor",
+    "title": "电梯监控画面",
+    "description": "单部电梯监控画面，800x480分辨率。包含当前楼层IO显示、上行/下行/运行/门开/故障指示灯，以及上行呼叫、下行呼叫、急停三个操作按钮。修正布局：状态指示灯行均匀居中排列，五个指示灯间距一致，左右留白对称；三个控制按钮水平间距扩大至70px，整体居中；修复故障指示灯与其他指示灯对齐混乱问题。",
+    "resolution": "800x480",
+    "hmi_type": "Comfort",
+    "generation_mode": "auto",
+    "template_screen": "",
+    "template_xml": ""
+  },
+  "tags": [
+    {
+      "name": "IO_Elevator_Floor",
+      "data_type": "Int",
+      "address": "",
+      "comment": "当前楼层"
+    },
+    {
+      "name": "STS_Elevator_Running",
+      "data_type": "Bool",
+      "address": "",
+      "comment": "电梯运行状态"
+    },
+    {
+      "name": "STS_Elevator_Up",
+      "data_type": "Bool",
+      "address": "",
+      "comment": "上行指示"
+    },
+    {
+      "name": "STS_Elevator_Down",
+      "data_type": "Bool",
+      "address": "",
+      "comment": "下行指示"
+    },
+    {
+      "name": "STS_Elevator_DoorOpen",
+      "data_type": "Bool",
+      "address": "",
+      "comment": "门开状态"
+    },
+    {
+      "name": "LMP_Elevator_Fault",
+      "data_type": "Bool",
+      "address": "",
+      "comment": "故障标志（闪烁）"
+    },
+    {
+      "name": "BTN_Elevator_Up",
+      "data_type": "Bool",
+      "address": "",
+      "comment": "上行呼叫按钮"
+    },
+    {
+      "name": "BTN_Elevator_Down",
+      "data_type": "Bool",
+      "address": "",
+      "comment": "下行呼叫按钮"
+    },
+    {
+      "name": "MEM_Elevator_EmergencyStop",
+      "data_type": "Bool",
+      "address": "",
+      "comment": "急停自保持"
+    }
+  ],
+  "text_lists": [],
+  "objects": [
+    {
+      "id": "TXT_Title",
+      "type": "Text",
+      "x": 200,
+      "y": 25,
+      "width": 400,
+      "height": 40,
+      "text": "电梯监控画面",
+      "font_size": 24,
+      "bold": true,
+      "color": "#E6EDF3"
+    },
+    {
+      "id": "LMP_Running",
+      "type": "Indicator",
+      "x": 120,
+      "y": 100,
+      "radius": 24,
+      "process_tag": "STS_Elevator_Running",
+      "blink_tag": null,
+      "color_on": "#27D17F",
+      "color_off": "#3A4250",
+      "blink": false,
+      "label": "运行",
+      "tag_binding": "STS_Elevator_Running",
+      "binding": {
+        "tag": "STS_Elevator_Running"
+      }
+    },
+    {
+      "id": "LMP_DoorOpen",
+      "type": "Indicator",
+      "x": 248,
+      "y": 100,
+      "radius": 24,
+      "process_tag": "STS_Elevator_DoorOpen",
+      "blink_tag": null,
+      "color_on": "#14E0B1",
+      "color_off": "#3A4250",
+      "blink": false,
+      "label": "门开",
+      "tag_binding": "STS_Elevator_DoorOpen",
+      "binding": {
+        "tag": "STS_Elevator_DoorOpen"
+      }
+    },
+    {
+      "id": "LMP_Up",
+      "type": "Indicator",
+      "x": 376,
+      "y": 100,
+      "radius": 24,
+      "process_tag": "STS_Elevator_Up",
+      "blink_tag": null,
+      "color_on": "#27D17F",
+      "color_off": "#3A4250",
+      "blink": false,
+      "label": "上行",
+      "tag_binding": "STS_Elevator_Up",
+      "binding": {
+        "tag": "STS_Elevator_Up"
+      }
+    },
+    {
+      "id": "LMP_Down",
+      "type": "Indicator",
+      "x": 504,
+      "y": 100,
+      "radius": 24,
+      "process_tag": "STS_Elevator_Down",
+      "blink_tag": null,
+      "color_on": "#14E0B1",
+      "color_off": "#3A4250",
+      "blink": false,
+      "label": "下行",
+      "tag_binding": "STS_Elevator_Down",
+      "binding": {
+        "tag": "STS_Elevator_Down"
+      }
+    },
+    {
+      "id": "LMP_Fault",
+      "type": "Indicator",
+      "x": 632,
+      "y": 100,
+      "radius": 24,
+      "process_tag": "LMP_Elevator_Fault",
+      "blink_tag": "LMP_Elevator_Fault",
+      "color_on": "#E25563",
+      "color_off": "#3A4250",
+      "blink": true,
+      "label": "故障",
+      "tag_binding": "LMP_Elevator_Fault",
+      "binding": {
+        "tag": "LMP_Elevator_Fault"
+      }
+    },
+    {
+      "id": "IO_Floor",
+      "type": "IOField",
+      "x": 280,
+      "y": 200,
+      "width": 160,
+      "height": 70,
+      "mode": "Output",
+      "process_tag": "IO_Elevator_Floor",
+      "font_size": 32,
+      "label": "当前楼层",
+      "display_format": "Decimal",
+      "decimal_digits": 0,
+      "unit": "",
+      "tag_binding": "IO_Elevator_Floor",
+      "binding": {
+        "tag": "IO_Elevator_Floor"
+      }
+    },
+    {
+      "id": "TXT_Floor_Unit",
+      "type": "Text",
+      "x": 450,
+      "y": 225,
+      "width": 40,
+      "height": 40,
+      "text": "楼",
+      "font_size": 24,
+      "bold": false,
+      "color": "#E6EDF3"
+    },
+    {
+      "id": "BTN_UpCall",
+      "type": "Button",
+      "x": 135,
+      "y": 350,
+      "width": 130,
+      "height": 56,
+      "text": "上行呼叫",
+      "tag_mode": "momentary",
+      "process_tag": "BTN_Elevator_Up",
+      "press_script": null,
+      "release_script": null,
+      "click_script": null,
+      "background_color": "#27D17F",
+      "tag_binding": "BTN_Elevator_Up",
+      "binding": {
+        "tag": "BTN_Elevator_Up"
+      }
+    },
+    {
+      "id": "BTN_DownCall",
+      "type": "Button",
+      "x": 335,
+      "y": 350,
+      "width": 130,
+      "height": 56,
+      "text": "下行呼叫",
+      "tag_mode": "momentary",
+      "process_tag": "BTN_Elevator_Down",
+      "press_script": null,
+      "release_script": null,
+      "click_script": null,
+      "background_color": "#14E0B1",
+      "tag_binding": "BTN_Elevator_Down",
+      "binding": {
+        "tag": "BTN_Elevator_Down"
+      }
+    },
+    {
+      "id": "BTN_EmergencyStop",
+      "type": "Button",
+      "x": 535,
+      "y": 350,
+      "width": 130,
+      "height": 56,
+      "text": "急停",
+      "tag_mode": "toggle",
+      "process_tag": "MEM_Elevator_EmergencyStop",
+      "press_script": null,
+      "release_script": null,
+      "click_script": null,
+      "background_color": "#E25563",
+      "tag_binding": "MEM_Elevator_EmergencyStop",
+      "binding": {
+        "tag": "MEM_Elevator_EmergencyStop"
+      }
+    }
+  ],
+  "scripts": [
+    {
+      "name": "Sub_BTN_UpCall_Press",
+      "language": "VBS",
+      "purpose": "按钮「上行呼叫」— 按下置位 BTN_Elevator_Up",
+      "code": "' 按钮「上行呼叫」按下 — 按下置位\nSmartTags(\"BTN_Elevator_Up\") = 1"
+    },
+    {
+      "name": "Sub_BTN_UpCall_Release",
+      "language": "VBS",
+      "purpose": "按钮「上行呼叫」— 释放复位 BTN_Elevator_Up",
+      "code": "' 按钮「上行呼叫」释放 — 释放复位\nSmartTags(\"BTN_Elevator_Up\") = 0"
+    },
+    {
+      "name": "Sub_BTN_DownCall_Press",
+      "language": "VBS",
+      "purpose": "按钮「下行呼叫」— 按下置位 BTN_Elevator_Down",
+      "code": "' 按钮「下行呼叫」按下 — 按下置位\nSmartTags(\"BTN_Elevator_Down\") = 1"
+    },
+    {
+      "name": "Sub_BTN_DownCall_Release",
+      "language": "VBS",
+      "purpose": "按钮「下行呼叫」— 释放复位 BTN_Elevator_Down",
+      "code": "' 按钮「下行呼叫」释放 — 释放复位\nSmartTags(\"BTN_Elevator_Down\") = 0"
+    },
+    {
+      "name": "Sub_BTN_EmergencyStop_Toggle",
+      "language": "VBS",
+      "purpose": "切换按钮「急停」— 翻转变量 MEM_Elevator_EmergencyStop",
+      "code": "' 切换按钮「急停」— 翻转变量 MEM_Elevator_EmergencyStop\nSmartTags(\"MEM_Elevator_EmergencyStop\") = Not SmartTags(\"MEM_Elevator_EmergencyStop\")"
+    }
+  ],
+  "_warnings": [
+    "已对 IR 自动执行轻量布局优化：对齐、最小间距、重叠与越界修正。"
+  ],
+  "_screen_size": {
+    "width": 800,
+    "height": 480
+  },
+  "_layout_optimized": true,
+  "_variable_engine_applied": true
+}

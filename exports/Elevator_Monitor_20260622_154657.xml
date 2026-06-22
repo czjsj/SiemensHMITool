@@ -1,0 +1,288 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Document xmlns="http://www.siemens.com/automation/SimaticML">
+  <Engineering version="V16" />
+  <Screen ID="813883a9-19d7-430e-a9df-ede5b42c2fa4" Name="Elevator_Monitor">
+    <AttributeList>
+      <Name>Elevator_Monitor</Name>
+      <DisplayName>电梯监控画面</DisplayName>
+      <Width>800</Width>
+      <Height>480</Height>
+    </AttributeList>
+    <Tags>
+      <Tag Name="IO_Elevator_Floor" DataType="Int">
+        <Comment>当前楼层</Comment>
+      </Tag>
+      <Tag Name="STS_Elevator_Running" DataType="Bool">
+        <Comment>电梯运行状态</Comment>
+      </Tag>
+      <Tag Name="STS_Elevator_Up" DataType="Bool">
+        <Comment>上行指示</Comment>
+      </Tag>
+      <Tag Name="STS_Elevator_Down" DataType="Bool">
+        <Comment>下行指示</Comment>
+      </Tag>
+      <Tag Name="STS_Elevator_DoorOpen" DataType="Bool">
+        <Comment>门开状态</Comment>
+      </Tag>
+      <Tag Name="LMP_Elevator_Fault" DataType="Bool">
+        <Comment>故障标志（闪烁）</Comment>
+      </Tag>
+      <Tag Name="BTN_Elevator_Up" DataType="Bool">
+        <Comment>上行呼叫按钮</Comment>
+      </Tag>
+      <Tag Name="BTN_Elevator_Down" DataType="Bool">
+        <Comment>下行呼叫按钮</Comment>
+      </Tag>
+      <Tag Name="MEM_Elevator_EmergencyStop" DataType="Bool">
+        <Comment>急停自保持</Comment>
+      </Tag>
+    </Tags>
+    <ObjectList>
+      <ScreenItem ID="d589c251-4f79-44c7-9758-4c2a5130898f" Name="TXT_Title" Type="TextField">
+      <Geometry>
+      <X>200</X>
+      <Y>25</Y>
+      <Width>400</Width>
+      <Height>40</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>aa9b974c-1e93-4302-9c70-749c957fb3f2</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">电梯监控画面</Text>
+</MultilingualText>
+      </Text>
+      <FontSize>24</FontSize>
+      <Bold>true</Bold>
+      <ForeColor>230,237,243</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="daf3d226-c1f1-40da-b12b-d490d4140c10" Name="LMP_Running" Type="Circle">
+      <Geometry>
+      <X>120</X>
+      <Y>100</Y>
+      <Width>48</Width>
+      <Height>48</Height>
+      </Geometry>
+      <Properties>
+      <FillColor>58,66,80</FillColor>
+      <BorderColor>120,130,140</BorderColor>
+      </Properties>
+      <Animations>
+      <ColorAnimation Tag="STS_Elevator_Running">
+      <Range Value="0" FillColor="58,66,80" />
+      <Range Value="1" FillColor="39,209,127" />
+      </ColorAnimation>
+      </Animations>
+      </ScreenItem>
+      <ScreenItem ID="4e5a0db8-66da-4cbb-b667-4ae6041019bc" Name="LMP_DoorOpen" Type="Circle">
+      <Geometry>
+      <X>248</X>
+      <Y>100</Y>
+      <Width>48</Width>
+      <Height>48</Height>
+      </Geometry>
+      <Properties>
+      <FillColor>58,66,80</FillColor>
+      <BorderColor>120,130,140</BorderColor>
+      </Properties>
+      <Animations>
+      <ColorAnimation Tag="STS_Elevator_DoorOpen">
+      <Range Value="0" FillColor="58,66,80" />
+      <Range Value="1" FillColor="20,224,177" />
+      </ColorAnimation>
+      </Animations>
+      </ScreenItem>
+      <ScreenItem ID="e0d53f30-6bc3-484b-bb6b-cdbcf1877aa9" Name="LMP_Up" Type="Circle">
+      <Geometry>
+      <X>376</X>
+      <Y>100</Y>
+      <Width>48</Width>
+      <Height>48</Height>
+      </Geometry>
+      <Properties>
+      <FillColor>58,66,80</FillColor>
+      <BorderColor>120,130,140</BorderColor>
+      </Properties>
+      <Animations>
+      <ColorAnimation Tag="STS_Elevator_Up">
+      <Range Value="0" FillColor="58,66,80" />
+      <Range Value="1" FillColor="39,209,127" />
+      </ColorAnimation>
+      </Animations>
+      </ScreenItem>
+      <ScreenItem ID="0b43a4cb-b7dd-46ab-9567-6025d93f9247" Name="LMP_Down" Type="Circle">
+      <Geometry>
+      <X>504</X>
+      <Y>100</Y>
+      <Width>48</Width>
+      <Height>48</Height>
+      </Geometry>
+      <Properties>
+      <FillColor>58,66,80</FillColor>
+      <BorderColor>120,130,140</BorderColor>
+      </Properties>
+      <Animations>
+      <ColorAnimation Tag="STS_Elevator_Down">
+      <Range Value="0" FillColor="58,66,80" />
+      <Range Value="1" FillColor="20,224,177" />
+      </ColorAnimation>
+      </Animations>
+      </ScreenItem>
+      <ScreenItem ID="3886a728-fca5-429f-b8ce-dc800c3ff2a9" Name="LMP_Fault" Type="Circle">
+      <Geometry>
+      <X>632</X>
+      <Y>100</Y>
+      <Width>48</Width>
+      <Height>48</Height>
+      </Geometry>
+      <Properties>
+      <FillColor>58,66,80</FillColor>
+      <BorderColor>120,130,140</BorderColor>
+      </Properties>
+      <Animations>
+      <ColorAnimation Tag="LMP_Elevator_Fault">
+      <Range Value="0" FillColor="58,66,80" />
+      <Range Value="1" FillColor="226,85,99" />
+      </ColorAnimation>
+      <FlashAnimation Tag="LMP_Elevator_Fault">
+      <Range Value="1" Flashing="Yes" />
+      </FlashAnimation>
+      </Animations>
+      </ScreenItem>
+      <ScreenItem ID="de92a884-4994-4cfb-8ca8-718729f5bb13" Name="IO_Floor" Type="IOField">
+      <Geometry>
+      <X>280</X>
+      <Y>200</Y>
+      <Width>160</Width>
+      <Height>70</Height>
+      </Geometry>
+      <Properties>
+      <Mode>Output</Mode>
+      <OutputFormat>Decimal</OutputFormat>
+      <DecimalDigits>0</DecimalDigits>
+      <FontSize>32</FontSize>
+      </Properties>
+      <Connection>
+      <ProcessTag>IO_Elevator_Floor</ProcessTag>
+      </Connection>
+      </ScreenItem>
+      <ScreenItem ID="59543f8a-e9a2-410b-82ba-6b8467c181f1" Name="TXT_Floor_Unit" Type="TextField">
+      <Geometry>
+      <X>450</X>
+      <Y>225</Y>
+      <Width>40</Width>
+      <Height>40</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>eef3a8bc-032f-4231-a50e-892573800df7</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">楼</Text>
+</MultilingualText>
+      </Text>
+      <FontSize>24</FontSize>
+      <Bold>false</Bold>
+      <ForeColor>230,237,243</ForeColor>
+      </Properties>
+      </ScreenItem>
+      <ScreenItem ID="610ad394-7021-4754-99dd-7f45d1a3be89" Name="BTN_UpCall" Type="Button">
+      <Geometry>
+      <X>135</X>
+      <Y>350</Y>
+      <Width>130</Width>
+      <Height>56</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>a47fdc92-61f5-4afe-9985-fba9540e52aa</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">上行呼叫</Text>
+</MultilingualText>
+      </Text>
+      <BackColor>39,209,127</BackColor>
+      </Properties>
+      <Connection>
+      <ProcessTag>BTN_Elevator_Up</ProcessTag>
+      </Connection>
+      </ScreenItem>
+      <ScreenItem ID="7ee47822-8b7d-468c-b68a-dc0777517d0d" Name="BTN_DownCall" Type="Button">
+      <Geometry>
+      <X>335</X>
+      <Y>350</Y>
+      <Width>130</Width>
+      <Height>56</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>a7b90da9-195e-4f53-ab9b-faeb4c28466a</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">下行呼叫</Text>
+</MultilingualText>
+      </Text>
+      <BackColor>20,224,177</BackColor>
+      </Properties>
+      <Connection>
+      <ProcessTag>BTN_Elevator_Down</ProcessTag>
+      </Connection>
+      </ScreenItem>
+      <ScreenItem ID="cb9623fc-3173-4160-981c-cf24d2424944" Name="BTN_EmergencyStop" Type="Button">
+      <Geometry>
+      <X>535</X>
+      <Y>350</Y>
+      <Width>130</Width>
+      <Height>56</Height>
+      </Geometry>
+      <Properties>
+      <Text>
+        <ID>c386fce8-cab3-4791-a7cf-c84f8a69d6eb</ID>
+        <MultilingualText>
+  <Text Language="zh-CN">急停</Text>
+</MultilingualText>
+      </Text>
+      <BackColor>226,85,99</BackColor>
+      </Properties>
+      <Connection>
+      <ProcessTag>MEM_Elevator_EmergencyStop</ProcessTag>
+      </Connection>
+      </ScreenItem>
+    </ObjectList>
+  </Screen>
+  <VBScripts>
+    
+      <Purpose>按钮「上行呼叫」— 按下置位 BTN_Elevator_Up</Purpose>
+      
+        ' 按钮「上行呼叫」按下 — 按下置位
+SmartTags("BTN_Elevator_Up") = 1
+      
+    
+    
+      <Purpose>按钮「上行呼叫」— 释放复位 BTN_Elevator_Up</Purpose>
+      
+        ' 按钮「上行呼叫」释放 — 释放复位
+SmartTags("BTN_Elevator_Up") = 0
+      
+    
+    
+      <Purpose>按钮「下行呼叫」— 按下置位 BTN_Elevator_Down</Purpose>
+      
+        ' 按钮「下行呼叫」按下 — 按下置位
+SmartTags("BTN_Elevator_Down") = 1
+      
+    
+    
+      <Purpose>按钮「下行呼叫」— 释放复位 BTN_Elevator_Down</Purpose>
+      
+        ' 按钮「下行呼叫」释放 — 释放复位
+SmartTags("BTN_Elevator_Down") = 0
+      
+    
+    
+      <Purpose>切换按钮「急停」— 翻转变量 MEM_Elevator_EmergencyStop</Purpose>
+      
+        ' 切换按钮「急停」— 翻转变量 MEM_Elevator_EmergencyStop
+SmartTags("MEM_Elevator_EmergencyStop") = Not SmartTags("MEM_Elevator_EmergencyStop")
+      
+    
+  </VBScripts>
+</Document>

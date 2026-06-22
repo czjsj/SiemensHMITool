@@ -160,8 +160,13 @@ def _build_user_text(task: str, output_schema: str, language: str) -> str:
 """.strip()
 
 
-def _safe_parse_json(text: str) -> Dict[str, Any]:
-    """尝试从 MiMo 输出中解析 JSON；失败则返回包裹 raw_text 的兜底结构。"""
+def _safe_parse_json(text: str, output_schema: str = "detailed") -> Dict[str, Any]:
+    """尝试从 MiMo 输出中解析 JSON；失败则返回与 output_schema 匹配的兜底结构。
+
+    对于 output_schema="ui"（HMI 画面审查），兜底结构包含审查专用字段
+    (pass/score/categories/summary/critical_issues/suggestions)，
+    避免解析失败时审查结果静默退化为全空导致"显示无"。
+    """
     cleaned = text.strip()
     if cleaned.startswith("```"):
         cleaned = cleaned.strip("`")
@@ -170,9 +175,24 @@ def _safe_parse_json(text: str) -> Dict[str, Any]:
     try:
         parsed = json.loads(cleaned)
         if isinstance(parsed, dict):
+            # 对 ui 审查结果做最小 schema 校验，补全缺失字段
+            if output_schema == "ui":
+                parsed = _ensure_review_schema(parsed)
             return parsed
     except json.JSONDecodeError:
         pass
+
+    # 兜底结构：根据 output_schema 返回不同字段集
+    if output_schema == "ui":
+        return {
+            "pass": False,
+            "score": 0,
+            "categories": {},
+            "summary": "审查结果解析失败：视觉模型未返回有效 JSON 结构。",
+            "critical_issues": ["视觉模型未按 JSON 格式返回审查结果，无法提取关键问题。"],
+            "suggestions": [],
+            "_parse_failed": True,
+        }
     return {
         "summary": "MiMo 返回非 JSON 文本，raw_text 中保留原始结果。",
         "visible_text": [],
@@ -182,6 +202,28 @@ def _safe_parse_json(text: str) -> Dict[str, Any]:
         "uncertainties": ["视觉模型未按 JSON 格式返回，raw_text 中保留了原始结果。"],
         "answer": text.strip(),
     }
+
+
+def _ensure_review_schema(parsed: dict) -> dict:
+    """对 ui 审查结果做最小 schema 校验，补全缺失的必需字段。"""
+    defaults = {
+        "score": 0,
+        "categories": {},
+        "summary": "",
+        "critical_issues": [],
+        "suggestions": [],
+    }
+    for key, default in defaults.items():
+        if key not in parsed:
+            parsed[key] = default
+    # score 必须是数字
+    if not isinstance(parsed.get("score"), (int, float)):
+        parsed["score"] = 0
+    # critical_issues / suggestions 必须是列表
+    for list_key in ("critical_issues", "suggestions"):
+        if not isinstance(parsed.get(list_key), list):
+            parsed[list_key] = []
+    return parsed
 
 
 def _extract_usage(raw: Dict[str, Any]) -> Dict[str, int]:
@@ -289,7 +331,7 @@ def analyze_with_mimo(
         raw = resp.json()
         message = raw.get("choices", [{}])[0].get("message", {})
         raw_text = message.get("content") or ""
-        parsed = _safe_parse_json(raw_text)
+        parsed = _safe_parse_json(raw_text, output_schema=output_schema)
 
         return {
             "ok": True,
