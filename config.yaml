@@ -361,7 +361,7 @@ output:
     \    </ObjectList>\n  </Hmi.Screen.Screen>\n</Document>"
 mimo:
   enabled: true
-  api_key: sk-crtatl6ichwjovl1mnymwylvdjkx2gwkz1y6hpkxt8xcp03k
+  api_key: 
   base_url: https://api.xiaomimimo.com/v1
   model: mimo-v2.5
   max_iterations: 6
