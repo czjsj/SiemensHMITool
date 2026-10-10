@@ -6,7 +6,7 @@ llm:
   providers:
     deepseek:
       base_url: https://api.deepseek.com
-      api_key: sk-f0cb4ab3cf524b428a55124c91776ae5
+      api_key: 
       chat_model: deepseek-v4-flash
       reasoner_model: deepseek-v4-flash
       supports_vision: false
